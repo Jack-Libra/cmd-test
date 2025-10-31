@@ -13,8 +13,13 @@ class PacketProcessor:
     
     def process(self, parsed: dict):
         """處理解析後的封包"""
+        frame_type = parsed.get('type')
         cmd = parsed.get('cmd')
         
+        if frame_type == 'ACK':
+            self._process_ack(parsed)
+            return
+
         # 5F 群組
         if cmd == '5F03':
             self._process_5f03(parsed)
@@ -37,6 +42,15 @@ class PacketProcessor:
         else:
             self.logger.warning(f"未處理的命令: {cmd}")
     
+    def _process_ack(self, data: dict):
+        """處理 ACK 確認"""
+        self.logger.info(
+            f"[ACK] 收到ACK確認 - "
+            f"SEQ:{data['seq']}, "
+            f"ADDR:0x{data['addr']:04X}"
+        )
+        self._save_json('ACK', data)
+
     def _process_5f03(self, data: dict):
         """處理 5F03 時相資料維管理（主動回報步階轉換）"""
         # 解析 StepID 特殊狀態

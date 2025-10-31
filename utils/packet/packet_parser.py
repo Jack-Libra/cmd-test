@@ -1,6 +1,6 @@
 import logging
 from typing import Optional
-from utils.core import MessageFrame
+from utils.core import MessageFrame, Ack, Nak
 
 class PacketParser:
     """封包解析器"""
@@ -11,33 +11,48 @@ class PacketParser:
     def parse(self, frame: bytes) -> Optional[dict]:
         """解析封包，返回結構化資料"""
         try:
-            msg = MessageFrame.decode(frame)
-            info = msg['info']
+            decoded = MessageFrame.decode(frame)
             
-            if not info or len(info) < 2:
-                return {"error": "封包解析失敗"}
+            # ACK 框
+            if decoded.get('type') == 'ACK':
+                return {
+                    "type": "ACK",
+                    "reply_type": "none",  # 不需要回覆
+                    "seq": decoded['seq'],
+                    "addr": decoded['addr'],
+                    "cmd": "ACK"
+                }
             
-            # 根據第一個 byte 判斷群組
-            if info[0] == 0x5F:
-                return self._parse_5f(msg, info)
-            elif info[0] == 0x0F:
-                return self._parse_0f(msg, info)
+            # 訊息框
+            if 'info' in decoded:
+                info = decoded['info']
+                
+                if not info or len(info) < 2:
+                    self.logger.error(f"資料錯誤: {len(info)} < 2")
+                    return None
+                
+                # 根據第一個 byte 判斷群組
+                if info[0] == 0x5F:
+                    return self._parse_5f(decoded, info)
+                elif info[0] == 0x0F:
+                    return self._parse_0f(decoded, info)
             
-            return {"error": "未知的封包群組"}
+            return None
             
         except Exception as e:
             self.logger.error(f"解析失敗: {e}")
-            return {"error": f"解析失敗: {e}"}
+            return None
     
     def _parse_5f(self, msg: dict, info: bytes) -> Optional[dict]:
         """解析 5F 群組"""
         cmd = info[1]
-        base = {"seq": msg['seq'], "addr": msg['addr'], "group": "5F"}
+        base = {"seq": msg['seq'], "addr": msg['addr'], "group": "5F", "type": "MESSAGE"}
         
-        # 5F 03: 時相資料維管理（主動回報步階轉換）
+        # 5F 03: 時相資料維管理（主動回報 - 不需回覆 ACK）
         if cmd == 0x03:
             if len(info) < 10:
-                return {"error": "封包解析失敗"}
+                self.logger.error(f"5F03資料錯誤: {len(info)} < 10")
+                return None
             
             phase_order = info[2]
             signal_map = info[3]
@@ -45,10 +60,11 @@ class PacketParser:
             signal_status = info[5]
             sub_phase_id = info[6]
             step_id = info[7]
-            step_sec = int.from_bytes(info[8:10], 'big')  # Up/Down Count
+            step_sec = int.from_bytes(info[8:10], 'big')
             
             base.update({
                 "cmd": "5F03",
+                "reply_type": "none",  # 主動回報，不需回覆
                 "phase_order": phase_order,
                 "signal_map": signal_map,
                 "signal_count": signal_count,
@@ -59,53 +75,61 @@ class PacketParser:
             })
             return base
         
-        # 5F 0C: 時相步階變換控制管理（主動回報現行時相及步階）
+        # 5F 0C: 時相步階變換控制管理（主動回報 - 不需回覆 ACK）
         elif cmd == 0x0C:
             if len(info) != 5:
-                return {"error": "封包解析失敗"}
+                self.logger.error(f"5F0C資料錯誤: {len(info)} != 5")
+                return None
             
             base.update({
                 "cmd": "5F0C",
+                "reply_type": "none",  # 主動回報，不需回覆
                 "control_strategy": info[2],
                 "sub_phase_id": info[3],
                 "step_id": info[4]
             })
             return base
         
-        # 5F C0: 控制策略回報
+        # 5F C0: 控制策略回報（查詢回報 - 需要回覆 ACK）
         elif cmd == 0xC0:
             if len(info) != 4:
-                return {"error": "封包解析失敗"}
+                self.logger.error(f"5FC0資料錯誤: {len(info)} != 4")
+                return None
             base.update({
                 "cmd": "5FC0",
+                "reply_type": "ack",  # 查詢回報，需要回覆 ACK
                 "control": info[2],
                 "effect_time": info[3]
             })
             return base
         
-        # 5F 00: 主動回報
+        # 5F 00: 主動回報（不需回覆 ACK）
         elif cmd == 0x00:
             if len(info) != 4:
-                return {"error": "封包解析失敗"}
+                self.logger.error(f"5F00資料錯誤: {len(info)} != 4")
+                return None
             base.update({
                 "cmd": "5F00",
+                "reply_type": "none",  # 主動回報，不需回覆
                 "control": info[2],
                 "begin_end": info[3]
             })
             return base
         
-        # 5F C8: 時制計畫回報
+        # 5F C8: 時制計畫回報（查詢回報 - 需要回覆 ACK）
         elif cmd == 0xC8:
             if len(info) < 6:
-                return {"error": "封包解析失敗"}
+                self.logger.error(f"5FC8資料錯誤: {len(info)} < 6")
+                return None
             plan_id, direct, phase_order, sub_cnt = info[2:6]
             need = 6 + sub_cnt + 2
             if len(info) < need:
-                return {"error": "封包解析失敗"}
+                return None
             greens = list(info[6:6+sub_cnt])
             cycle, offset = info[6+sub_cnt], info[6+sub_cnt+1]
             base.update({
                 "cmd": "5FC8",
+                "reply_type": "ack",  # 查詢回報，需要回覆 ACK
                 "plan_id": plan_id,
                 "direct": direct,
                 "phase_order": phase_order,
@@ -116,48 +140,71 @@ class PacketParser:
             })
             return base
         
-        return {"error": "封包解析失敗"}
+        # 5F 08: 現場操作回報（主動回報 - 不需回覆 ACK）
+        elif cmd == 0x08:
+            if len(info) != 3:  # 5F 08 + FieldOperate(1)
+                self.logger.error(f"5F08資料錯誤: {len(info)} != 3")
+                return None
+            
+            field_operate = info[2]
+            field_operate_map = {
+                0x01: "現場手動",
+                0x02: "現場全紅",
+                0x40: "現場閃光",
+                0x80: "上次現場操作回復"
+            }
+            field_operate_desc = field_operate_map.get(field_operate, f"未知操作碼(0x{field_operate:02X})")
+            
+            base.update({
+                "cmd": "5F08",
+                "reply_type": "none",  # 主動回報，不需回覆
+                "field_operate": field_operate,
+                "field_operate_desc": field_operate_desc
+            })
+            return base
+        return None
     
     def _parse_0f(self, msg: dict, info: bytes) -> Optional[dict]:
         """解析 0F 群組（訊息回應）"""
         cmd = info[1]
-        base = {"seq": msg['seq'], "addr": msg['addr'], "group": "0F"}
+        base = {"seq": msg['seq'], "addr": msg['addr'], "group": "0F", "type": "MESSAGE"}
         
-        # 0F 80: 設定回報（有效）
+        # 0F 80: 設定回報（有效）（查詢回報 - 需要回覆 ACK）
         if cmd == 0x80:
             if len(info) < 4:
-                return {"error": "封包解析失敗"}
+                return None
             command_id = int.from_bytes(info[2:4], 'big')
             base.update({
                 "cmd": "0F80",
+                "reply_type": "ack",  # 查詢回報，需要回覆 ACK
                 "command_id": command_id,
                 "valid": True
             })
             return base
         
-        # 0F 81: 設定/查詢回報（無效）
+        # 0F 81: 設定/查詢回報（無效）（查詢回報 - 需要回覆 ACK）
         elif cmd == 0x81:
             if len(info) < 5:
-                return {"error": "封包解析失敗"}
+                return None
             
             command_id = int.from_bytes(info[2:4], 'big')
-            error_code = info[3]
-            param_num = info[4]
+            error_code = info[4]
+            param_num = info[5] if len(info) > 5 else None
             
-            # 解析錯誤碼 bit 定義
             errors = {
-                "無此訊息": bool(error_code & 0x01),        # bit0: 無此訊息
-                "無法應答資料": bool(error_code & 0x02),        # bit1: 無法應答資料
-                "參數值無效": bool(error_code & 0x04),      # bit2: 參數值無效
-                "位元組無參數": bool(error_code & 0x08),           # bit3: 位元組無參數
-                "設備別錯誤": bool(error_code & 0x10),         # bit4: 設備別錯誤
-                "逾時": bool(error_code & 0x20),            # bit5: 逾時
-                "參數值超過限": bool(error_code & 0x40),       # bit6: 參數值超過限
-                "已被訊息等級": bool(error_code & 0x80)            # bit7: 已被訊息等級
+                "invalid_msg": bool(error_code & 0x01),
+                "no_response": bool(error_code & 0x02),
+                "param_invalid": bool(error_code & 0x04),
+                "no_param": bool(error_code & 0x08),
+                "prep_error": bool(error_code & 0x10),
+                "timeout": bool(error_code & 0x20),
+                "exceed_limit": bool(error_code & 0x40),
+                "reported": bool(error_code & 0x80)
             }
             
             base.update({
                 "cmd": "0F81",
+                "reply_type": "ack",  # 查詢回報，需要回覆 ACK
                 "command_id": command_id,
                 "valid": False,
                 "error_code": error_code,
@@ -166,4 +213,4 @@ class PacketParser:
             })
             return base
         
-        return {"error": "封包解析失敗"}
+        return None

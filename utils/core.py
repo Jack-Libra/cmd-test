@@ -66,6 +66,7 @@ class MessageFrame:
         if xor_checksum(frame[:-1]) != frame[-1]:
             raise ValueError("校驗和錯誤")
         if frame[-3] != DLE or frame[-2] != ETX:
+            print(frame.hex().upper())
             raise ValueError("尾端格式錯誤")
         
         seq = frame[2]
@@ -84,6 +85,16 @@ class Ack:
         cks = xor_checksum(hdr)
         return hdr + struct.pack(">B", cks)
 
+    @staticmethod
+    def decode(frame: bytes) -> dict:
+        if not frame or frame[0] != DLE or frame[1] != ACK:
+            raise ValueError("非 ACK 框")
+        if xor_checksum(frame[:-1]) != frame[-1]:
+            raise ValueError("校驗和錯誤")
+        seq = frame[2]
+        addr = int.from_bytes(frame[3:5], 'big')
+        return {"seq": seq, "addr": addr}
+
 class Nak:
     """NAK 框：DLE NAK SEQ ADDR(2) LEN(2) ERR CKS"""
     
@@ -92,3 +103,5 @@ class Nak:
         hdr = struct.pack(">BBBHHB", DLE, NAK, _u8(seq), _u16(addr), 9, _u8(err))
         cks = xor_checksum(hdr)
         return hdr + struct.pack(">B", cks)
+
+  

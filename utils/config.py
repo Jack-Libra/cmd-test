@@ -1,15 +1,15 @@
 # 控制器清單
 TRAFFIC_CONTROLLERS = {
     "TC003": {
-        "id": "TC003",
-        "ip": "192.168.13.89",
-        "port": 7002
+        "TC_ip": "192.168.13.89",
+        "TC_port": 7002,
+        "BackServer_ip": "0.0.0.0",
+        "BackServer_port": 8889,
+        "TransServer_ip": "0.0.0.0",
+        "TransServer_port": 5555,
     }
 }
 
-# 本機監聽設定（接收控制器回報）
-LISTEN_HOST = "192.168.13.89"
-LISTEN_PORT = 7002
 
 # 日誌設定
 LOG_DIR = "./logs"

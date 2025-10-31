@@ -1,70 +1,95 @@
 import logging
 
+import logging
+
 class FrameBuffer:
-    """封包緩衝與切割（DLE+STX ... DLE+ETX+CKS）"""
+    """封包緩衝與切割（支援 DLE+STX/ACK）"""
     
     def __init__(self):
         self.buffer = bytearray()
         self.logger = logging.getLogger(__name__)
     
-    def feed(self, data: bytes) -> list[bytes]:
+    def feed(self, data: bytes):
         """餵入資料，返回完整封包列表"""
         self.buffer.extend(data)
         packets = []
         
-        while len(self.buffer) >= 10:  # 最小封包長度
-            # 尋找 DLE(0xAA) + STX(0xBB)
-            start_idx = self._find_start()
+        while len(self.buffer) >= 3:  # 最小封包（ACK = 9 bytes）
+            # 尋找封包開頭並確認類型
+            result = self._find_frame_start()
             
-            if start_idx == -1:
-                # 沒找到開頭，清空緩衝區
+            if result is None:
                 if len(self.buffer) > 0:
-                    self.logger.warning(f"清空 {len(self.buffer)} bytes 無效資料")
+                    self.logger.debug(f"清空 {len(self.buffer)} bytes 無效資料（未找到有效封包開頭）")
                 self.buffer.clear()
                 break
             
-            # 捨棄開頭前的無效資料
+            start_idx, frame_type = result
+            
             if start_idx > 0:
-                self.logger.warning(f"捨棄 {start_idx} bytes 無效資料")
                 self.buffer = self.buffer[start_idx:]
             
-            # 檢查長度欄位
-            if len(self.buffer) < 7:
-                break  # 資料不足，等待更多
             
-            # 讀取 LEN 欄位 (offset 5~6, big-endian)
-            length = int.from_bytes(self.buffer[5:7], 'big')
-            total = length + 1  # +1 for CKS
+            # 根據已確認的封包類型提取
+            if frame_type == 'STX':  
+                # 直接讀取 LEN 欄位（第 6、7 bytes，索引 5、6）
+                if len(self.buffer) < 7:
+                    self.logger.debug(f"STX資料錯誤: {len(self.buffer)} < 7")
+                    break 
+                
+                total = int.from_bytes(self.buffer[5:7], 'big')
+            
+            elif frame_type == 'ACK':
+                
+                total = 9  # DLE ACK SEQ ADDR(2) LEN(2) CKS
+            
+            else: # NAK
+                total = 10  # DLE NAK SEQ ADDR(2) LEN(2) ERR CKS
+
             
             if len(self.buffer) < total:
+                self.logger.debug(f"資料bytes計算錯誤: {len(self.buffer)} < {total}")
                 break  # 等待更多資料
             
-            # 提取完整封包
             packet = bytes(self.buffer[:total])
+            packets.append(packet)
+            self.logger.debug(f"提取封包: {len(packet)} bytes (type={frame_type})")
             
-            # 驗證尾端 DLE(0xAA) + ETX(0xCC)
-            if self._validate_tail(packet):
-                packets.append(packet)
-                self.logger.debug(f"提取封包: {len(packet)} bytes")
-            else:
-                self.logger.warning("封包尾端格式錯誤，跳過")
-            
-            # 移除已處理的封包
             self.buffer = self.buffer[total:]
         
         return packets
     
-    def _find_start(self) -> int:
-        """尋找 DLE(0xAA) + STX(0xBB) 開頭"""
-        for i in range(len(self.buffer) - 1):
-            if self.buffer[i] == 0xAA and self.buffer[i+1] == 0xBB:
-                return i
-        return -1
-    
-    def _validate_tail(self, packet: bytes) -> bool:
-        """驗證 DLE(0xAA) + ETX(0xCC) 尾端"""
-        return len(packet) >= 3 and packet[-3] == 0xAA and packet[-2] == 0xCC
-    
-    def clear(self):
-        """清空緩衝區"""
-        self.buffer.clear()        
+    def _find_frame_start(self):
+        """
+        尋找有效的封包開頭並確認封包類型
+        
+        返回: (start_index, frame_type) 或 None
+        """
+        # 控制碼到類型的映射
+        CTRL_TO_TYPE = {
+            0xBB: 'STX',
+            0xDD: 'ACK',
+            0xEE: 'NAK'
+        }
+        
+        i = 0
+        while i < len(self.buffer) - 1:
+            if self.buffer[i] == 0xAA:
+                ctrl = self.buffer[i + 1]
+                
+                if ctrl in CTRL_TO_TYPE:
+                    # 找到有效封包開頭，同時確認類型
+                    return (i, CTRL_TO_TYPE[ctrl])
+                
+                elif ctrl == 0xAA:
+                    # INFO 中的轉義 DLE，跳過
+                    i += 1
+                    continue
+                
+                # 無效的控制碼，跳過
+                i += 1
+            else:
+                i += 1
+        
+        return None
+        
