@@ -57,3 +57,29 @@
 2025-10-31 13:18:18 [INFO] __main__: 正在關閉...
 2025-10-31 13:18:18 [INFO] network.transport: UDP Socket 已關閉
 2025-10-31 13:18:18 [INFO] __main__: 程式已結束
+2025-11-04 14:56:26 [INFO] root: ============================================================
+2025-11-04 14:56:26 [INFO] root: 日誌系統啟動 - 模式: COMMAND
+2025-11-04 14:56:26 [INFO] root: 日誌檔案: /home/jacklibra/test/logs/traffic_control.log
+2025-11-04 14:56:26 [INFO] root: ============================================================
+2025-11-04 14:56:26 [ERROR] network.transport: 開啟 Socket 失敗: [Errno 99] Cannot assign requested address
+2025-11-04 14:56:26 [ERROR] __main__: 無法開啟傳輸層
+2025-11-04 15:00:56 [INFO] root: ============================================================
+2025-11-04 15:00:56 [INFO] root: 日誌系統啟動 - 模式: COMMAND
+2025-11-04 15:00:56 [INFO] root: 日誌檔案: /home/jacklibra/test/logs/traffic_control.log
+2025-11-04 15:00:56 [INFO] root: ============================================================
+2025-11-04 15:00:56 [ERROR] network.transport: 開啟 Socket 失敗: [Errno 99] Cannot assign requested address
+2025-11-04 15:00:56 [ERROR] __main__: 無法開啟傳輸層
+2025-11-04 15:01:12 [INFO] root: ============================================================
+2025-11-04 15:01:12 [INFO] root: 日誌系統啟動 - 模式: COMMAND
+2025-11-04 15:01:12 [INFO] root: 日誌檔案: /home/jacklibra/test/logs/traffic_control.log
+2025-11-04 15:01:12 [INFO] root: ============================================================
+2025-11-04 15:01:12 [ERROR] network.transport: 開啟 Socket 失敗: [Errno 99] Cannot assign requested address
+2025-11-04 15:01:12 [ERROR] __main__: 無法開啟傳輸層
+2025-11-04 15:03:12 [INFO] root: ============================================================
+2025-11-04 15:03:12 [INFO] root: 日誌系統啟動 - 模式: COMMAND
+2025-11-04 15:03:12 [INFO] root: 日誌檔案: /home/jacklibra/test/logs/traffic_control.log
+2025-11-04 15:03:12 [INFO] root: ============================================================
+2025-11-04 15:03:12 [INFO] network.transport: UDP Socket 已開啟: 0.0.0.0:5555
+2025-11-04 15:03:15 [INFO] __main__: 收到中斷信號，退出...
+2025-11-04 15:03:15 [INFO] network.transport: UDP Socket 已關閉
+2025-11-04 15:03:15 [INFO] __main__: 已關閉連線

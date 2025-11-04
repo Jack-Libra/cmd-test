@@ -1,11 +1,13 @@
 import struct
 import logging
 
-DLE = 0xAA
-STX = 0xBB
-ETX = 0xCC
-ACK = 0xDD
-NAK = 0xEE
+FRAME = {
+    "DLE": 0xAA,
+    "STX": 0xBB,
+    "ETX": 0xCC,
+    "ACK": 0xDD,
+    "NAK": 0xEE
+}
 
 def _u8(x: int) -> int:
     if not (0 <= x <= 0xFF):
@@ -47,6 +49,22 @@ def restore_info(stuffed: bytes) -> bytes:
             i += 1
     return bytes(out)
 
+
+def decode(frame: bytes) -> dict:
+    if not frame or frame[0] != FRAME["DLE"] or frame[1] not in [FRAME["STX"], FRAME["ACK"]]:
+        raise ValueError("非 ACK 或 STX 框")
+    if xor_checksum(frame[:-1]) != frame[-1]:
+        raise ValueError("校驗和錯誤")
+    seq = frame[2]
+    addr = int.from_bytes(frame[3:5], 'big')
+    len = frame[6]
+    if frame[1] == FRAME["STX"]:
+        return {"type": "STX", "seq": seq, "addr": addr,"len":len,"info": frame[7:-3]}
+    elif frame[1] == FRAME["ACK"]:
+        return {"type": "ACK", "seq": seq, "addr": addr,"len":len}
+    else:
+        raise ValueError(f"非 ACK 或 STX 框: {frame}")
+
 class MessageFrame:
     """訊息框：DLE STX SEQ ADDR(2) LEN(2) INFO DLE ETX CKS"""
     
@@ -54,53 +72,28 @@ class MessageFrame:
     def encode(seq: int, addr: int, info: bytes) -> bytes:
         stuffed = stuff_info(info)
         length = 1+1+1+2+2+len(stuffed)+1+1
-        hdr = struct.pack(">BBBHH", DLE, STX, _u8(seq), _u16(addr), _u16(length))
-        tail = struct.pack(">BB", DLE, ETX)
+        hdr = struct.pack(">BBBHH", FRAME["DLE"], FRAME["STX"], _u8(seq), _u16(addr), _u16(length))
+        tail = struct.pack(">BB", FRAME["DLE"], FRAME["ETX"])
         cks = xor_checksum(hdr + stuffed + tail)
         return hdr + stuffed + tail + struct.pack(">B", cks)
     
-    @staticmethod
-    def decode(frame: bytes) -> dict:
-        if not frame or frame[0] != DLE or frame[1] != STX:
-            raise ValueError("非訊息框")
-        if xor_checksum(frame[:-1]) != frame[-1]:
-            raise ValueError("校驗和錯誤")
-        if frame[-3] != DLE or frame[-2] != ETX:
-            print(frame.hex().upper())
-            raise ValueError("尾端格式錯誤")
-        
-        seq = frame[2]
-        addr = int.from_bytes(frame[3:5], 'big')
-        stuffed_info = frame[7:-3]
-        info = restore_info(stuffed_info)
-        
-        return {"seq": seq, "addr": addr, "info": info}
 
 class Ack:
     """ACK 框：DLE ACK SEQ ADDR(2) LEN(2) CKS"""
     
     @staticmethod
     def encode(seq: int, addr: int) -> bytes:
-        hdr = struct.pack(">BBBHH", DLE, ACK, _u8(seq), _u16(addr), 8)
+        hdr = struct.pack(">BBBHH", FRAME["DLE"], FRAME["ACK"], _u8(seq), _u16(addr), 8)
         cks = xor_checksum(hdr)
         return hdr + struct.pack(">B", cks)
 
-    @staticmethod
-    def decode(frame: bytes) -> dict:
-        if not frame or frame[0] != DLE or frame[1] != ACK:
-            raise ValueError("非 ACK 框")
-        if xor_checksum(frame[:-1]) != frame[-1]:
-            raise ValueError("校驗和錯誤")
-        seq = frame[2]
-        addr = int.from_bytes(frame[3:5], 'big')
-        return {"seq": seq, "addr": addr}
 
 class Nak:
     """NAK 框：DLE NAK SEQ ADDR(2) LEN(2) ERR CKS"""
     
     @staticmethod
     def encode(seq: int, addr: int, err: int) -> bytes:
-        hdr = struct.pack(">BBBHHB", DLE, NAK, _u8(seq), _u16(addr), 9, _u8(err))
+        hdr = struct.pack(">BBBHHB", FRAME["DLE"], FRAME["NAK"], _u8(seq), _u16(addr), 9, _u8(err))
         cks = xor_checksum(hdr)
         return hdr + struct.pack(">B", cks)
 

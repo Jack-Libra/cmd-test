@@ -14,42 +14,48 @@ class PacketProcessor:
     def process(self, parsed: dict):
         """處理解析後的封包"""
         frame_type = parsed.get('type')
-        cmd = parsed.get('cmd')
-        
+        cmd = parsed.get('指令')
+        info = {}
+
+
         if frame_type == 'ACK':
-            self._process_ack(parsed)
-            return
+            info = self._process_ack(parsed)
+            return info
+
 
         # 5F 群組
         if cmd == '5F03':
-            self._process_5f03(parsed)
+            info = self._process_5f03(parsed)
         elif cmd == '5F0C':
-            self._process_5f0c(parsed)
+            info = self._process_5f0c(parsed)
         elif cmd == '5FC0':
-            self._process_5fc0(parsed)
+            info = self._process_5fc0(parsed)
         elif cmd == '5F00':
-            self._process_5f00(parsed)
+            info = self._process_5f00(parsed)
         elif cmd == '5FC8':
-            self._process_5fc8(parsed)
+            info = self._process_5fc8(parsed)
+        elif cmd == '5F08':
+            info = self._process_5f08(parsed)
         
         # 0F 群組
         elif cmd == '0F80':
-            self._process_0f80(parsed)
+            info = self._process_0f80(parsed)
         elif cmd == '0F81':
-            self._process_0f81(parsed)
-        
+            info = self._process_0f81(parsed)
         
         else:
             self.logger.warning(f"未處理的命令: {cmd}")
+            return None
+
+        return info
     
     def _process_ack(self, data: dict):
         """處理 ACK 確認"""
-        self.logger.info(
-            f"[ACK] 收到ACK確認 - "
-            f"SEQ:{data['seq']}, "
-            f"ADDR:0x{data['addr']:04X}"
-        )
-        self._save_json('ACK', data)
+        return {
+            "類型": "ACK",
+            "序號": data['seq'],
+            "位址": f"0x{data['addr']:04X}"
+        }
 
     def _process_5f03(self, data: dict):
         """處理 5F03 時相資料維管理（主動回報步階轉換）"""
@@ -64,43 +70,41 @@ class PacketProcessor:
         }
         step_desc = step_map.get(data['step_id'], f"步階{data['step_id']}")
         
-        self.logger.info(
-            f"[5F03] 📊 時相資料回報 - "
-            f"SEQ:{data['seq']}, "
-            f"ADDR:0x{data['addr']:04X}, "
-            f"PhaseOrder:0x{data['phase_order']:02X}, "
-            f"SubPhase:{data['sub_phase_id']}, "
-            f"Step:{step_desc}, "
-            f"StepSec:{data['step_sec']}秒, "
-            f"Status:0x{data['signal_status']:02X}"
-        )
-        self._save_json('5F03', data)
+        return {
+            "指令": "5F03",
+            "序號": data['seq'],
+            "控制器編號": f"TC{data['addr']:03X}",
+            "時相順序": f"0x{data['phase_order']:02X}",
+            "子時相": data['sub_phase_id'],
+            "步階": step_desc,
+            "步階時間": f"{data['step_sec']}秒",
+            "狀態": f"0x{data['signal_status']:02X}"
+        }
     
     def _process_5f0c(self, data: dict):
         """處理 5F0C 時相步階變換控制管理（主動回報現行時相及步階）"""
         # 解析 ControlStrategy 參考 5FH+10H
         control_desc = self._decode_control_strategy(data['control_strategy'])
         
-        self.logger.info(
-            f"[5F0C] 🔄 時相步階變換回報 - "
-            f"SEQ:{data['seq']}, "
-            f"ADDR:0x{data['addr']:04X}, "
-            f"Control:{control_desc}, "
-            f"SubPhase:{data['sub_phase_id']}, "
-            f"Step:{data['step_id']}"
-        )
-        self._save_json('5F0C', data)
+        return {
+            "指令": "5F0C",
+            "序號": data['seq'],
+            "位址": f"0x{data['addr']:04X}",
+            "控制策略": control_desc,
+            "子時相": data['sub_phase_id'],
+            "步階": data['step_id']
+        }
     
     def _process_0f80(self, data: dict):
         """處理 0F80 訊息回應（有效）"""
         
-        self.logger.info(
-            f"[0F80] ✅ 訊息回應有效 - "
-            f"SEQ:{data['seq']}, "
-            f"ADDR:0x{data['addr']:04X}, "
-            f"CommandID:0x{data['command_id']:04X}"
-        )
-        self._save_json('0F80', data)
+        return {
+            "指令": "0F80",
+            "序號": data['seq'],
+            "位址": f"0x{data['addr']:04X}",
+            "命令ID": f"0x{data['command_id']:04X}",
+            "狀態": "有效"
+        }
     
     def _process_0f81(self, data: dict):
         """處理 0F81 訊息回應（無效）"""
@@ -124,30 +128,31 @@ class PacketProcessor:
         
         error_desc = ", ".join(error_list) if error_list else "未知錯誤"
         
-        param_info = ""
-        if data['errors'].get('param_invalid') and data['param_num'] > 0:
-            param_info = f", 錯誤參數編號:{data['param_num']}"
+        info = {
+            "指令": "0F81",
+            "序號": data['seq'],
+            "控制器編號": f"TC{data['addr']:03X}",
+            "命令ID": f"0x{data['command_id']:04X}",
+            "狀態": "無效",
+            "錯誤碼": f"0x{data['error_code']:02X}",
+            "錯誤描述": error_desc
+        }
         
-        self.logger.warning(
-            f"[0F81] ❌ 訊息回應無效 - "
-            f"SEQ:{data['seq']}, "
-            f"ADDR:0x{data['addr']:04X}, "
-            f"CommandID:0x{data['command_id']:04X}, "
-            f"ErrorCode:0x{data['error_code']:02X} ({error_desc}){param_info}"
-        )
-        self._save_json('0F81', data)
+        if data['errors'].get('param_invalid') and data.get('param_num') and data['param_num'] > 0:
+            info["錯誤參數編號"] = data['param_num']
+        
+        return info
     
     def _process_5fc0(self, data: dict):
         """處理控制策略回報"""
         control_desc = self._decode_control_strategy(data['control'])
-        self.logger.info(
-            f"[5FC0] 控制策略回報 - "
-            f"SEQ:{data['seq']}, "
-            f"ADDR:0x{data['addr']:04X}, "
-            f"Control:{control_desc}, "
-            f"EffectTime:{data['effect_time']}分"
-        )
-        self._save_json('5FC0', data)
+        return {
+            "指令": "5FC0",
+            "序號": data['seq'],
+            "控制器編號": f"TC{data['addr']:03X}",
+            "控制策略": control_desc,
+            "生效時間": f"{data['effect_time']}分"
+        }
     
     def _process_5f00(self, data: dict):
         """處理主動回報"""
@@ -155,27 +160,34 @@ class PacketProcessor:
         status = status_map.get(data['begin_end'], f"未知({data['begin_end']})")
         control_desc = self._decode_control_strategy(data['control'])
         
-        self.logger.info(
-            f"[5F00] 主動回報 - "
-            f"SEQ:{data['seq']}, "
-            f"ADDR:0x{data['addr']:04X}, "
-            f"Control:{control_desc}, "
-            f"Status:{status}"
-        )
-        self._save_json('5F00', data)
+        return {
+            "指令": "5F00",
+            "序號": data['seq'],
+            "控制器編號": f"TC{data['addr']:03X}",
+            "控制策略": control_desc,
+            "狀態": status
+        }
     
     def _process_5fc8(self, data: dict):
         """處理時制計畫回報"""
-        self.logger.info(
-            f"[5FC8] 時制計畫回報 - "
-            f"SEQ:{data['seq']}, "
-            f"ADDR:0x{data['addr']:04X}, "
-            f"PlanID:{data['plan_id']}, "
-            f"Cycle:{data['cycle_time']}秒, "
-            f"Offset:{data['offset']}秒"
-        )
-        self._save_json('5FC8', data)
+        return {
+            "指令": "5FC8",
+            "序號": data['seq'],
+            "控制器編號": f"TC{data['addr']:03X}",
+            "計畫ID": data['plan_id'],
+            "週期時間": f"{data['cycle_time']}秒",
+            "偏移時間": f"{data['offset']}秒"
+        }
     
+    def _process_5f08(self, data: dict):
+        """處理現場操作回報"""
+        return {
+            "指令": "5F08",
+            "序號": data['seq'],
+            "控制器編號": f"TC{data['addr']:03X}",
+            "現場操作": data['現場操作碼']
+        }
+
     def _decode_control_strategy(self, control: int) -> str:
         """解碼控制策略（參考 5FH+10H 規格）"""
         strategies = []
