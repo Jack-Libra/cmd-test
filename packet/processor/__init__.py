@@ -1,5 +1,4 @@
+from .packet_handler import PacketHandler
 from .packet_processor import PacketProcessor
-from .base import BaseProcessor
-
-__all__ = ['PacketProcessor', 'BaseProcessor']
+__all__ = ['PacketHandler', 'PacketProcessor']
 

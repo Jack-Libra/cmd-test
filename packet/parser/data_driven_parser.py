@@ -8,7 +8,6 @@ import datetime
 from typing import Optional, Dict, Any
 from core.frame import FrameDecoder
 from ..definitions.registry import DefinitionRegistry
-
 from .unified_field_parser import UnifiedFieldParser
 
 class DataDrivenParser():
