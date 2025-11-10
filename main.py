@@ -1,82 +1,79 @@
-import sys
+"""
+交通控制系統主程式
 
+"""
 
-import logging
-from utils.log_setup import setup_logging
-from network.transport import UDPTransport
-from network.buffer import FrameBuffer
-from utils.packet.packet_parser import PacketParser
-from utils.packet.packet_processor import PacketProcessor
-from utils.packet.packet_builder import PacketBuilder
+import time
+from config import TCConfig
+from network import UDPTransport
+from packet import PacketRegistry
+from logging.setup import setup_logging, get_logger
 
 def main():
-    # 接收模式：輸出到終端 + 檔案
-    setup_logging(mode="receive")
-    logger = logging.getLogger(__name__)
+    """程式入口"""
+    # 設置日誌
+    logger = get_logger()
     
-    # 初始化模組
-    transport = UDPTransport("0.0.0.0", 5000)
-    buffer = FrameBuffer()
-    parser = PacketParser()
-    processor = PacketProcessor("./data")
+    # 加載配置
+    config = TCConfig(device_id=3)
+    tc_id = config.get_tc_id()
+    if isinstance(tc_id, str) and tc_id.startswith('TC'):
+        tc_id = int(tc_id.replace('TC', ''))
+    else:
+        tc_id = int(tc_id)
     
-    if not transport.open():
-        logger.error("無法開啟傳輸層")
+    # 初始化網路
+    network = UDPTransport(
+        local_ip=config.get_transserver_ip(),
+        local_port=config.get_transserver_port(),
+        server_ip=config.get_tc_ip(),
+        server_port=config.get_tc_port()
+    )
+    
+    # 初始化封包註冊中心
+    registry = PacketRegistry()
+    
+    logger.info(f"控制器ID: {tc_id}")
+    logger.info(f"控制器地址: {config.get_tc_ip()}:{config.get_tc_port()}")
+    
+    # 開啟網路連接
+    if not network.open():
+        logger.error("開啟 UDP 連接失敗")
         return
     
-    logger.info("=" * 50)
-    logger.info("開始監聽號誌控制器（UDP 5000）")
-    logger.info("=" * 50)
-    
     try:
+        logger.info("開始接收資料，按 Ctrl+C 結束...")
         while True:
-            # 1. 接收原始資料
-            result = transport.recv()
-            if not result:
-                continue
+            data, addr = network.receive_data()
+            if addr and data:
+                # 處理緩衝區，獲取完整幀列表
+                frames = network.process_buffer(data)
+                
+                for frame in frames:
+                    # 解析幀，獲取封包
+                    packet = registry.parse(frame)
+                    
+                    if packet:
+                        # 處理封包
+                        registry.process(packet)
+                        
+                        # 如果需要ACK，發送ACK
+                        if packet.get("needs_ack", False):
+                            seq = packet.get("seq", 0)
+                            tc_id_val = packet.get("tc_id", tc_id)
+                            ack_frame = registry.create_ack(seq, tc_id_val)
+                            if ack_frame and addr:
+                                network.send_data(ack_frame)
+                                logger.debug(f"發送ACK: Seq={seq}, TC_ID={tc_id_val}")
             
-            data, addr = result
-            logger.info(f"📥 收到資料 from {addr}: {len(data)} bytes")
+            time.sleep(0.01)
             
-            # 2. 切割完整封包
-            packets = buffer.feed(data)
-            
-            for packet in packets:
-                logger.debug(f"完整封包: {packet.hex().upper()}")
-                
-                # 3. 解析封包
-                parsed = parser.parse(packet)
-                if not parsed:
-                    logger.warning("⚠️  無法解析封包")
-                    continue
-                
-                # 4. 處理封包
-                processor.process(parsed)
-                
-                # 5. 根據 reply_type 決定是否回覆 ACK
-                reply_type = parsed.get('reply_type', 'none')
-                
-                if reply_type == 'ack':
-                    # 查詢回報：回覆 ACK
-                    ack = PacketBuilder.build_ack(parsed['seq'], parsed['addr'])
-                    if transport.send(ack, addr):
-                        logger.info(f"✅ 已回覆 ACK (seq={parsed['seq']}, addr=0x{parsed['addr']:04X})")
-                    else:
-                        logger.error(f"❌ 回覆 ACK 失敗")
-                elif reply_type == 'none':
-                    # 主動回報：不回覆 ACK
-                    logger.debug(f"📋 主動回報 {parsed.get('cmd')}，不需回覆 ACK")
-                elif parsed.get('type') == 'ACK':
-                    # 收到設備的 ACK（對我們之前命令的確認），不需再回覆
-                    logger.info(f"📩 收到設備 ACK 確認 (seq={parsed['seq']}, addr=0x{parsed['addr']:04X})")
-    
     except KeyboardInterrupt:
-        logger.info("\n🛑 收到中斷信號，正在關閉...")
+        logger.info("程式已手動停止")
     except Exception as e:
-        logger.error(f"❌ 程式異常: {e}", exc_info=True)
+        logger.error(f"程式錯誤: {e}", exc_info=True)
     finally:
-        transport.close()
-        logger.info("程式已結束")
+        network.close()
 
 if __name__ == "__main__":
     main()
