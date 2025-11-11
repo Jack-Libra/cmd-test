@@ -4,8 +4,7 @@
 
 import logging
 import binascii
-import datetime
-from typing import Optional, Dict, Any
+from typing import Dict
 from core.frame import FrameDecoder
 from ..definitions.registry import DefinitionRegistry
 from .unified_field_parser import UnifiedFieldParser
@@ -19,7 +18,7 @@ class DataDrivenParser():
         self.field_parser = UnifiedFieldParser(self.registry)
         self.frame_decoder = FrameDecoder()
     
-    def parse(self, frame: bytes) -> Optional[Dict[str, Any]]:
+    def parse(self, frame: bytes):
         """解析封包"""
         try:
             decoded = self.frame_decoder.decode(frame)
@@ -43,7 +42,7 @@ class DataDrivenParser():
             self.logger.error(f"解析失敗: {e}", exc_info=True)
             return None
     
-    def can_parse(self, frame: bytes) -> bool:
+    def can_parse(self, frame: bytes):
         """判斷是否能解析"""
         try:
             decoded = self.frame_decoder.decode(frame)
@@ -51,7 +50,7 @@ class DataDrivenParser():
         except:
             return False
     
-    def _parse_stx(self, decoded: Dict, frame: bytes) -> Optional[Dict]:
+    def _parse_stx(self, decoded: Dict, frame: bytes):
         """解析 STX 框"""
         payload = decoded["payload"]  # 純淨的 INFO 數據
         
@@ -65,51 +64,43 @@ class DataDrivenParser():
         
         # 查找定義
         definition = self.registry.get_definition(cmd_code)
-        if not definition:
-            self.logger.warning(f"未定義的指令碼: {cmd_code}")
-            return self._parse_unknown(cmd_code, decoded, frame)
         
+        if not definition:            
+            #self.logger.error(f"未定義的指令碼: {cmd_code}")
+            return
         
-        # 解析封包（跳過指令碼部分）
-        info_payload = payload[2:]  # 跳過 5F 03
-        return self._parse_by_definition(definition, decoded["header"], info_payload, frame)
+        header = {
+        "seq": decoded["seq"],
+        "addr": decoded["addr"],
+        "len": decoded["len"]
+        }
+        
+        # 解析封包
+        return self._parse_by_definition(definition, header, payload, cmd_code, frame)
     
     
-    def _parse_by_definition(self, definition: Dict, header: Dict, 
-                            info_payload: bytes, frame: bytes) -> Dict:
+    def _parse_by_definition(self, definition, header, 
+                            payload, cmd_code, frame):
         """根據定義解析封包 - 統一處理所有字段"""
         # 基礎字段
         result = {
-            "seq": header["seq"],
-            "addr": header["addr"],
-            "tc_id": header["addr"],
-            "len": header["len"],
-            "command": definition.get("name", "").split()[0] if definition.get("name") else "",
+            "序列號": header["seq"],
+            "號誌控制器ID": header["addr"],
+            "欄位長度": header["len"],
+            "指令編號": cmd_code,
             "指令": definition.get("name", ""),
             "回覆類型": definition.get("reply_type", ""),
             "needs_ack": definition.get("needs_ack", False),
-            "raw_data": binascii.hexlify(frame).decode('ascii'),
-            "timestamp": datetime.datetime.now().isoformat()
+            "原始封包": binascii.hexlify(frame).decode('ascii')
         }
         
-        # 統一解析所有字段
+        # 解析payload字段
         if "fields" in definition:
-            result = self.field_parser.parse_all_fields(
-                info_payload, definition["fields"], result
-            )
-        
+            result = self.field_parser.parse_fields(
+                payload, definition["fields"], result
+            )     
         return result
     
-    def _parse_unknown(self, cmd_code: str, decoded: Dict, frame: bytes) -> Dict:
-        """處理未知封包"""
-        return {
-            "seq": decoded["seq"],
-            "addr": decoded["addr"],
-            "tc_id": decoded["addr"],
-            "指令": cmd_code,
-            "raw_data": binascii.hexlify(frame).decode('ascii'),
-            "status": "unknown",
-            "length": len(frame),
-            "timestamp": datetime.datetime.now().isoformat()
-        }
+
+
 

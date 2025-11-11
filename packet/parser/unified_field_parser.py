@@ -14,8 +14,8 @@ class UnifiedFieldParser:
     def __init__(self, registry: DefinitionRegistry):
         self.registry = registry
     
-    def parse_all_fields(self, payload: bytes, fields: List[Dict], result: Dict) -> Dict:
-        """解析所有字段（統一處理）"""
+    def parse_fields(self, payload: bytes, fields: List[Dict], result: Dict) -> Dict:
+        """解析payload字段（統一處理）"""
         current_index = 0  # 當前 PAYLOAD 索引位置
         
         for field in fields:
@@ -34,19 +34,21 @@ class UnifiedFieldParser:
             # 解析字段值
             value = self._parse_field_by_type(payload, field, actual_index, result)
             
-            # 應用映射（如果有）
-            if "mapping" in field and value is not None:
-                mapping = field["mapping"]
-                desc = mapping.get(value, f"未知(0x{value:02X})")
-                result[f"_{field_name}_mapping_desc"] = desc
-                # 如果字段有後處理，映射描述會在那裡使用
-            
-            # 應用後處理（如果有）
-            if "post_process" in field and value is not None:
-                processed_value = field["post_process"](value, result)
-                result[field_name] = processed_value
+            if value is not None:
+                # 應用映射（如果有）
+                if "mapping" in field:
+                    mapping = field["mapping"]
+                    processed_value = mapping.get(value, f"未知(0x{value:02X})")
+                else:
+                    processed_value = value
+                
+                #應用後處理（如果有）
+                if "post_process" in field:
+                    result[field_name] = field["post_process"](processed_value, result)
+                else:
+                    result[field_name] = processed_value
             else:
-                result[field_name] = value
+                result[field_name] = None
             
             # 更新當前索引（用於下一個字段）
             if field_index != "dynamic" and field_index is not None:

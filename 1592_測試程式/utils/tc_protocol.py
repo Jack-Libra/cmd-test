@@ -153,6 +153,7 @@ class TrafficControlProtocol:
                 elif command_prefix == 0x0F:
                     command_code = f"0F{command_suffix:02X}"
                 else:
+                    #log_info(f"接收到未知的指令: {binascii.hexlify(packet_data).decode('ascii')}")
                     continue
                 
                 # 使用註冊的處理器

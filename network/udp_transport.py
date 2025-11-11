@@ -5,8 +5,8 @@ UDP傳輸層
 
 import socket
 import logging
-from typing import Optional, Tuple
-from .buffer import FrameBuffer
+from typing import Optional
+from .buffer import PacketBuffer
 
 class UDPTransport:
     """UDP傳輸層"""
@@ -16,7 +16,7 @@ class UDPTransport:
         self.local_addr = (local_ip, local_port)
         self.server_addr = (server_ip, server_port)
         self.socket: Optional[socket.socket] = None
-        self.buffer = FrameBuffer()
+        self.buffer = PacketBuffer()
         self.logger = logging.getLogger(__name__)
     
     def open(self) -> bool:
@@ -26,6 +26,9 @@ class UDPTransport:
         
         try:
             self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1) # 允許重複使用地址
+            
             self.socket.bind(self.local_addr)
             self.socket.settimeout(1.0)
             self.buffer.buffer.clear()
@@ -42,13 +45,13 @@ class UDPTransport:
             self.socket = None
             self.logger.info("UDP連接已關閉")
     
-    def receive_data(self) -> Tuple[bytes, Optional[Tuple[str, int]]]:
+    def receive_data(self):
         """接收數據"""
         if not self.socket:
             return b"", None
         
         try:
-            data, addr = self.socket.recvfrom(4096)
+            data, addr = self.socket.recvfrom(4096) # 4KB
             return data, addr
         except socket.timeout:
             return b"", None
@@ -71,5 +74,5 @@ class UDPTransport:
             return False
     
     def process_buffer(self, data: bytes) -> list:
-        """處理緩衝區數據，返回完整幀列表"""
+        """處理緩衝區數據，返回完整封包列表"""
         return self.buffer.feed(data)

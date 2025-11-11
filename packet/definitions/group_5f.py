@@ -60,7 +60,7 @@ def process_5fc0_control_strategy(control_strategy):
 # 5F 群組封包定義
 F5_GROUP_DEFINITIONS = {
     "5F03": {
-        "name": "時相資料維管理",
+        "name": "時相資料庫管理",
         "description": "主動回報號誌控制器步階轉換之資料",
         "reply_type": "主動回報",
         "needs_ack": False,
@@ -69,27 +69,27 @@ F5_GROUP_DEFINITIONS = {
         
         # 统一字段列表，按顺序定义，使用 index 表示位置
         "fields": [
-            {"name": "phase_order", "index": 0, "type": "uint8", "description": "時相編號"},
+            {"name": "phase_order", "index": 2, "type": "uint8", "description": "時相編號"},
             
             # signal_map 直接轉換為列表，不顯示原始值
             {
-                "name": "signal_map",
-                "index": 1,
+                "name": "號誌位置圖",
+                "index": 3,
                 "type": "uint8",
                 "description": "號誌位置圖",
                 "post_process": lambda value, result: int_to_binary_list(value)
                 # 結果：signal_map = [1, 0, 1, 0, 1, 0, 1, 0] 而不是 85
             },
             
-            {"name": "signal_count", "index": 2, "type": "uint8", "description": "信號燈數量"},
-            {"name": "sub_phase_id", "index": 3, "type": "uint8", "description": "分相序號"},
-            {"name": "step_id", "index": 4, "type": "uint8", "description": "步階序號"},
-            {"name": "step_sec", "index": 5, "type": "uint16", "endian": "big", "description": "步階秒數"},
+            {"name": "signal_count", "index": 4, "type": "uint8", "description": "信號燈數量"},
+            {"name": "sub_phase_id", "index": 5, "type": "uint8", "description": "分相序號"},
+            {"name": "step_id", "index": 6, "type": "uint8", "description": "步階序號"},
+            {"name": "step_sec", "index": 7, "type": "uint16", "endian": "big", "description": "步階秒數"},
             
             # signal_status 直接轉換為詳細狀態，不顯示原始列表
             {
-                "name": "signal_status",
-                "index": 7,
+                "name": "信號狀態列表",
+                "index": 8,
                 "type": "list",
                 "item_type": "uint8",
                 "count_from": "signal_count",
@@ -101,7 +101,7 @@ F5_GROUP_DEFINITIONS = {
         
         "validation": {
             "type": "min_length",
-            "value": 7,
+            "value": 9,
             "error_message": "5F03資料長度不足"
         }
     },
@@ -116,8 +116,8 @@ F5_GROUP_DEFINITIONS = {
         
         "fields": [
             {
-                "name": "field_operate",
-                "index": 0,  # PAYLOAD[0]
+                "name": "現場操作碼",
+                "index": 2,  # PAYLOAD[0]
                 "type": "uint8",
                 "description": "現場操作碼",
                 # 自定義映射
@@ -128,17 +128,34 @@ F5_GROUP_DEFINITIONS = {
                     0x80: "上次現場操作回復"
                 },
                 # 後處理：格式化輸出
-                "post_process": lambda value, result: f"0x{value:02X}H ({result.get('_mapping_desc', '未知')})"
+                #"post_process": lambda value, result: f"0x{value:02X}H ({result.get('_mapping_desc', '未知')})"
             }
         ],
         
         "validation": {
             "type": "exact_length",
-            "value": 1,
+            "value": 3,
             "error_message": "5F08資料長度錯誤"
         }
     },
-    
+    "5F48": {
+        "name": "目前時制計畫管理",
+        "description": "查詢目前時制計畫內容",
+        "reply_type": "查詢",
+        "needs_ack": True,
+        "group": "5F",
+        "command": 0x48,
+        
+        # 無訊息參數（只有命令碼 5F 48）
+        "fields": [],
+        
+        "validation": {
+            "type": "exact_length",
+            "value": 2,
+            "error_message": "5F48為查詢命令，無參數"
+        }
+    },
+
     "5FC8": {
         "name": "時制計畫回報",
         "description": "回報目前時制計畫內容",
@@ -149,46 +166,46 @@ F5_GROUP_DEFINITIONS = {
         
         "fields": [
             {
-                "name": "plan_id",
-                "index": 0,
+                "name": "時制計畫編號",
+                "index": 2,
                 "type": "uint8",
                 "description": "時制計畫編號"
             },
             {
-                "name": "direct",
-                "index": 1,
+                "name": "基準方向",
+                "index": 3,
                 "type": "uint8",
                 "description": "基準方向"
             },
             {
-                "name": "phase_order",
-                "index": 2,
+                "name": "時相種類編號",
+                "index": 4,
                 "type": "uint8",
                 "description": "時相種類編號"
             },
             {
-                "name": "sub_phase_count",
-                "index": 3,
+                "name": "綠燈分相數",
+                "index": 5,
                 "type": "uint8",
                 "description": "綠燈分相數"
             },
             {
-                "name": "greens",
-                "index": 4,  # PAYLOAD[4] 開始
+                "name": "各分相綠燈時間",
+                "index": 6,  # PAYLOAD[4] 開始
                 "type": "list",
                 "item_type": "uint8",
                 "count_from": "sub_phase_count",  # 依賴 sub_phase_count
                 "description": "各分相綠燈時間"
             },
             {
-                "name": "cycle_time",
+                "name": "週期秒數",
                 "index": None,  # 使用 current_index（自動跟蹤）
                 "type": "uint16",
                 "endian": "big",
                 "description": "週期秒數"
             },
             {
-                "name": "offset",
+                "name": "時差秒數",
                 "index": None,  # 使用 current_index（自動跟蹤）
                 "type": "uint16",
                 "endian": "big",
@@ -198,7 +215,7 @@ F5_GROUP_DEFINITIONS = {
         
         "validation": {
             "type": "min_length",
-            "value": 4,
+            "value": 7,
             "error_message": "5FC8資料長度不足"
         }
     },
@@ -213,49 +230,49 @@ F5_GROUP_DEFINITIONS = {
         
         "fields": [
             {
-                "name": "segment_type",
-                "index": 0,
+                "name": "時段類型",
+                "index": 2,
                 "type": "uint8",
                 "description": "時段類型"
             },
             {
-                "name": "segment_count",
-                "index": 1,
+                "name": "時段數量",
+                "index": 3,
                 "type": "uint8",
                 "description": "時段數量"
             },
             {
-                "name": "segment_list", #(Hour+Min+PlanID)(segment_count)
-                "index": 2,  # PAYLOAD[2] 開始
+                "name": "時段列表", #(Hour+Min+PlanID)(segment_count)
+                "index": 4,  # PAYLOAD[2] 開始
                 "type": "struct_list",
                 "item_fields": [
                     {"name": "hour", "type": "uint8"},
                     {"name": "minute", "type": "uint8"},
                     {"name": "plan_id", "type": "uint8"}
                 ],
-                "count_from": "segment_count",
+                "count_from": "時段數量",
                 "description": "時段列表"
             },
             {
-                "name": "num_weekday",
+                "name": "星期數量",
                 "index": None, # 使用 current_index（自動跟蹤）
                 "type": "uint8",
                 "description": "星期數量"
             },
             {
-                "name": "weekday_list",
+                "name": "星期列表",
                 "index": None, # 使用 current_index（自動跟蹤）
                 "type": "list",
                 "item_type": "uint8",
-                "count_from": "num_weekday",
-                "index_calc": lambda result: 2 + result.get("segment_count", 0) * 3 + 1,
+                "count_from": "星期數量",
+                "index_calc": lambda result: 4 + result.get("時段數量", 0) * 3 + 1,
                 "description": "星期列表"
             }
         ],
         
         "validation": {
             "type": "min_length",
-            "value": 2,
+            "value": 5,
             "error_message": "5FC6資料長度不足"
         }
     }

@@ -6,18 +6,17 @@ import logging
 from typing import Dict, Optional
 from core.frame import MessageFrame
 from ..definitions.registry import DefinitionRegistry
-from .base import BaseBuilder
 from .field_builder import FieldBuilder
 
-class DataDrivenBuilder(BaseBuilder):
+class DataDrivenBuilder:
     """資料驅動封包構建器（資料驅動）"""
     
-    def __init__(self, registry: DefinitionRegistry = None):
+    def __init__(self, registry: DefinitionRegistry):
         self.logger = logging.getLogger(__name__)
-        self.registry = registry or DefinitionRegistry()
+        self.registry = registry
         self.field_builder = FieldBuilder(self.registry)
     
-    def build(self, cmd_code: str, fields: Dict, seq: int = 1, addr: int = 0) -> Optional[bytes]:
+    def build(self, cmd_code: str, fields: Dict, seq: int = 1, addr: int = 0):
         """構建封包（資料驅動）"""
         try:
             definition = self.registry.get_definition(cmd_code)
@@ -38,7 +37,7 @@ class DataDrivenBuilder(BaseBuilder):
             self.logger.error(f"構建封包失敗: {e}", exc_info=True)
             return None
     
-    def _build_info(self, definition: Dict, fields: Dict) -> Optional[bytes]:
+    def _build_info(self, definition: Dict, fields: Dict):
         """構建INFO字段"""
         info = bytearray()
         
