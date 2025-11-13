@@ -13,25 +13,27 @@ from config.config import TCConfig
 from network.udp_transport import UDPTransport
 from packet.registry import PacketRegistry
 from log_config.setup import setup_logging 
-
+import binascii
 class Base:
     """基類：提供共同的初始化和接收功能"""
-    RESPONSE_COMMANDS = {
-        "0F80", "0F81",
-        "設定/查詢回報（成功）", "設定/查詢回報（失敗）"
-    }    
 
-    def __init__(self, device_id=3):
+    def __init__(self, device_id=3, mode: str = "receive"):
         self.device_id = device_id
-        self.config = TCConfig(device_id)
-        self.logger = setup_logging()
         
-        # 解析 TC ID
-        tc_id_str = self.config.get_tc_id()
-        if isinstance(tc_id_str, str) and tc_id_str.startswith('TC'):
-            self.tc_id = int(tc_id_str.replace('TC', ''))
-        else:
-            self.tc_id = int(tc_id_str)
+        
+        # 設置日誌文件名
+        log_file_map = {
+            "receive": "receive.log",
+            "command": "command.log",
+        }
+        log_file = log_file_map.get(mode, "traffic_control.log")
+        
+        # 初始化日誌
+        self.logger = setup_logging(log_file=log_file, mode=mode)
+        
+        self.config = TCConfig(device_id)
+        
+        self.tc_id = device_id
         
         # 初始化網路
         self.network = UDPTransport(
@@ -42,20 +44,17 @@ class Base:
         )
         
         # 初始化封包註冊中心
-        self.registry = PacketRegistry()
+        self.registry = PacketRegistry(mode=mode)
         
         # 執行緒控制
         self.running = False
         self.receive_thread = None
         
-        self.logger.info(f"系統初始化完成 - TC{self.tc_id:03d}")
+        self.logger.info(f"系統初始化完成 - {mode}模式")
     def _get_command(self, packet: Dict) -> str:
         """獲取封包的命令碼（統一方法）"""
-        return packet.get("指令", "") or packet.get("command", "")
+        return packet.get("指令編號", "")
     
-    def _is_command_response(self, command: str):
-        """判斷是否為指令回應封包（0F80/0F81）"""
-        return command in self.RESPONSE_COMMANDS  
 
     def start(self):
         """啟動系統（子類可覆寫）"""
@@ -85,6 +84,12 @@ class Base:
                     frames = self.network.process_buffer(data)
                     
                     for frame in frames:
+                        # 檢查是否為原始ACK封包
+                        if len(frame) >= 3 and frame[0] == 0xAA and frame[1] == 0xDD:
+                            frame_hex = binascii.hexlify(frame).decode('ascii').upper()
+                            self.logger.info(f"收到原始ACK封包: {frame_hex} 來自 {addr[0]}:{addr[1]}")                        
+                        
+                        
                         # 解析封包
                         packet = self.registry.parse(frame)
                         if packet:
@@ -107,7 +112,9 @@ class Base:
 
 class Receive(Base):
     """接收模式：只接收數據，不發送命令"""
-    
+    def __init__(self, device_id=3):
+        super().__init__(device_id, mode="receive")
+
     def start(self):
         """啟動接收模式"""
         if not super().start():
@@ -131,11 +138,11 @@ class Receive(Base):
         
         # 只處理封包，不發送ACK
         self.registry.process(packet)
-        
-        command = self._get_command(packet)
-        seq = packet.get("seq", 0)
 
-        self.logger.debug(f"接收封包: {command} (Seq={seq}) - 不發送ACK")
+        
+        #command = self._get_command(packet)
+        #seq = packet.get("序列號")
+        #self.logger.info(f"接收封包: {command} (Seq={seq}) - 不發送ACK")
     
     def run(self):
         """運行接收模式"""
@@ -167,7 +174,7 @@ class Command(Base):
     }
     
     def __init__(self, device_id=3):
-        super().__init__(device_id)
+        super().__init__(device_id, mode="command")
         
         # 指令追蹤
         self.pending_commands = {}  # {seq: command_info}
@@ -211,16 +218,16 @@ class Command(Base):
         command = self._get_command(packet)
         
         # 檢查是否為指令回應（0F80/0F81）
-        if self._is_command_response(command):
-            self._handle_command_response(packet)
+        if command in ["0F80", "0F81"]:
+            self._handle_command_response(packet, addr)
         
         # 處理封包並發送ACK（如果需要）
         self.registry.process_and_ack(packet, self.network, addr, self.logger)
     
-    def _handle_command_response(self, packet: Dict):
+    def _handle_command_response(self, packet: Dict, addr: tuple):
         """處理指令回應"""
         command = self._get_command(packet)
-        seq = packet.get("seq", 0)
+        seq = packet.get("序列號", 0)
         
         with self.pending_lock:
             if seq not in self.pending_commands:
@@ -237,7 +244,7 @@ class Command(Base):
                 self.logger.info(f"✓ 指令執行成功: {cmd_info['description']}")
                 print(f"✓ 指令執行成功: {cmd_info['description']}")
             elif is_failure:
-                error_code = packet.get("error_code", 0)
+                error_code = packet.get("錯誤碼", 0)
                 self._update_command_status(cmd_info, 'failed', error_code)
                 self.logger.error(
                     f"✗ 指令執行失敗: {cmd_info['description']} "
@@ -361,7 +368,7 @@ class Command(Base):
         """執行 5F40 指令（查詢控制策略）"""
         try:
             # 5F40 無參數
-            self._send_command("5F40", {}, "查詢控制策略")
+            self._send_command("5F40", {}, "查詢控制策略", addr=self.tc_id)
         except Exception as e:
             print(f"5F40 指令錯誤: {e}")
     
@@ -384,7 +391,8 @@ class Command(Base):
             self._send_command(
                 "5F10",
                 fields,
-                f"設定控制策略 (策略:0x{control_strategy:02X}, 時間:{effect_time}分鐘)"
+                f"設定控制策略 (策略:0x{control_strategy:02X}, 時間:{effect_time}分鐘)",
+                addr=self.tc_id
             )
         except Exception as e:
             print(f"5F10 指令錯誤: {e}")
@@ -393,7 +401,7 @@ class Command(Base):
         """執行 5F48 指令（查詢時制計畫）"""
         try:
             # 5F48 無參數
-            self._send_command("5F48", {}, "查詢目前時制計畫內容")
+            self._send_command("5F48", {}, "查詢目前時制計畫內容", addr=self.tc_id)
         except Exception as e:
             print(f"5F48 指令錯誤: {e}")
     
@@ -407,11 +415,11 @@ class Command(Base):
         try:
             plan_id = int(args[0])
             fields = {"plan_id": plan_id}
-            self._send_command("5F18", fields, f"選擇時制計畫 (計畫ID:{plan_id})")
+            self._send_command("5F18", fields, f"選擇時制計畫 (計畫ID:{plan_id})", addr=self.tc_id)
         except Exception as e:
             print(f"5F18 指令錯誤: {e}")
     
-    def _send_command(self, cmd_code: str, fields: dict, description: str):
+    def _send_command(self, cmd_code: str, fields: dict, description: str, addr: int):
         """發送指令封包"""
         try:
             # 獲取序列號
@@ -426,8 +434,9 @@ class Command(Base):
             
             # 記錄指令（用於追蹤）
             cmd_info = {
-                'seq': seq,
-                'command_type': cmd_code,
+                '序列號': seq,
+                '號誌控制器ID': self.tc_id,
+                '指令': cmd_code,
                 'description': description,
                 'send_time': datetime.datetime.now().isoformat(),
                 'status': 'pending'
@@ -437,15 +446,16 @@ class Command(Base):
                 self.pending_commands[seq] = cmd_info
             
             # 發送封包
-            if self.network.send_data(frame):
+            if self.network.send_data(frame, addr=(self.config.get_tc_ip(), self.config.get_tc_port())):
                 self.logger.info(f"發送指令: {description} (SEQ: {seq})")
-                print(f"發送指令: {description}")
+                
+                self.logger.info(f"封包內容: {binascii.hexlify(frame).decode('ascii')}")
             else:
-                print("封包發送失敗")
+                self.logger.error("封包發送失敗")
                 with self.pending_lock:
                     if seq in self.pending_commands:
                         del self.pending_commands[seq]
                 
         except Exception as e:
             self.logger.error(f"發送指令封包失敗: {e}", exc_info=True)
-            print(f"發送失敗: {e}")
+            self.logger.error(f"發送失敗: {e}")

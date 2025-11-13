@@ -8,41 +8,66 @@ from config.constants import (
     CS_PHASE_CONTROL, CS_IMMEDIATE_CONTROL, CS_ACTUATED, CS_SPECIAL_ROUTE
 )
 
-def process_5f03_signal_status(signal_status_list):
-    """處理5F03信號狀態（行人燈邏輯）"""
-    signal_status_details = []
+def format_5f03_signal_status(signal_status_list, result=None):
+    """
+    直接將信號狀態列表格式化為字符串列表（一步完成處理和格式化）
     
-    for status in signal_status_list:
-        status_list = int_to_binary_list(status)
+    Args:
+        signal_status_list: 原始信號狀態字節列表
+    
+    Returns:
+        格式化後的字符串列表，格式：["   方向 1: 全紅、行人紅燈", ...]
+    """
+    formatted_statuses = []
+    
+    for i, status_byte in enumerate(signal_status_list, 1):
+        status_list = int_to_binary_list(status_byte)
         
-        # 提取原始位
+        # 提取行人燈位
         pedgreen_bit = status_list[6] if len(status_list) > 6 else 0
         pedred_bit = status_list[7] if len(status_list) > 7 else 0
         
-        # 判斷行人燈狀態邏輯
+        # 判斷行人燈狀態（特殊邏輯：兩個位都為1表示閃爍）
         if pedgreen_bit and pedred_bit:
-            pedgreen = 0
-            pedred = 0
-            pedgreenflash = 1
+            ped_status = "行人綠燈閃爍"
+        elif pedgreen_bit:
+            ped_status = "行人綠燈"
+        elif pedred_bit:
+            ped_status = "行人紅燈"
         else:
-            pedgreen = pedgreen_bit
-            pedred = pedred_bit
-            pedgreenflash = 0
+            ped_status = None
         
-        status_dict = {
-            "allred": status_list[0] if len(status_list) > 0 else 0,
-            "yellow": status_list[1] if len(status_list) > 1 else 0,
-            "green": status_list[2] if len(status_list) > 2 else 0,
-            "turnleft": status_list[3] if len(status_list) > 3 else 0,
-            "straight": status_list[4] if len(status_list) > 4 else 0,
-            "turnright": status_list[5] if len(status_list) > 5 else 0,
-            "pedgreen": pedgreen,
-            "pedred": pedred,
-            "pedgreenflash": pedgreenflash,
-        }
-        signal_status_details.append(status_dict)
+        # 構建狀態描述
+        status_parts = []
+        
+        # 車道燈狀態（互斥：全紅、黃燈、綠燈）
+        if len(status_list) > 0 and status_list[0]:
+            status_parts.append("全紅")
+        elif len(status_list) > 1 and status_list[1]:
+            status_parts.append("黃燈")
+        elif len(status_list) > 2 and status_list[2]:
+            status_parts.append("綠燈")
+        
+        # 轉向燈狀態（可組合：左轉、直行、右轉）
+        turn_parts = []
+        if len(status_list) > 3 and status_list[3]:
+            turn_parts.append("左轉")
+        if len(status_list) > 4 and status_list[4]:
+            turn_parts.append("直行")
+        if len(status_list) > 5 and status_list[5]:
+            turn_parts.append("右轉")
+        if turn_parts:
+            status_parts.append("、".join(turn_parts))
+        
+        # 行人燈狀態
+        if ped_status:
+            status_parts.append(ped_status)
+        
+        # 組合最終描述
+        status_desc = "、".join(status_parts) if status_parts else "未知"
+        formatted_statuses.append(f"   方向 {i}: {status_desc}")
     
-    return signal_status_details
+    return formatted_statuses
 
 def process_5fc0_control_strategy(control_strategy):
     """處理5FC0控制策略位"""
@@ -66,8 +91,9 @@ F5_GROUP_DEFINITIONS = {
         "needs_ack": False,
         "group": "5F",
         "command": 0x03,
+        "log_modes": ["receive"],
         
-        # 统一字段列表，按顺序定义，使用 index 表示位置
+        # 统一字段列表，按順序定義，使用 index 表示位置
         "fields": [
             {"name": "phase_order", "index": 2, "type": "uint8", "description": "時相編號"},
             
@@ -77,7 +103,7 @@ F5_GROUP_DEFINITIONS = {
                 "index": 3,
                 "type": "uint8",
                 "description": "號誌位置圖",
-                "post_process": lambda value, result: int_to_binary_list(value)
+                "post_process": lambda value, result: f"0x{value:02X} = {int_to_binary_list(value)}"
                 # 結果：signal_map = [1, 0, 1, 0, 1, 0, 1, 0] 而不是 85
             },
             
@@ -86,7 +112,7 @@ F5_GROUP_DEFINITIONS = {
             {"name": "step_id", "index": 6, "type": "uint8", "description": "步階序號"},
             {"name": "step_sec", "index": 7, "type": "uint16", "endian": "big", "description": "步階秒數"},
             
-            # signal_status 直接轉換為詳細狀態，不顯示原始列表
+            # 信號狀態列表：直接格式化為字符串列表
             {
                 "name": "信號狀態列表",
                 "index": 8,
@@ -94,8 +120,8 @@ F5_GROUP_DEFINITIONS = {
                 "item_type": "uint8",
                 "count_from": "signal_count",
                 "description": "信號狀態列表",
-                "post_process": lambda value, result: process_5f03_signal_status(value)
-                # 結果：signal_status = [詳細狀態字典列表] 而不是 [129, 196, 129, 196]
+                "post_process": format_5f03_signal_status
+                
             }
         ],
         
@@ -105,7 +131,62 @@ F5_GROUP_DEFINITIONS = {
             "error_message": "5F03資料長度不足"
         }
     },
-    
+    "5F40": {
+        "name": "目前控制策略管理",
+        "description": "查詢目前控制策略之設定內容",
+        "reply_type": "查詢",
+        "needs_ack": True,
+        "group": "5F",
+        "command": 0x40,
+        "log_modes": ["command"],  # 查詢命令通常在 command 模式記錄
+        # 無訊息參數（只有命令碼 5F 40）
+        "fields": [],
+        
+        "validation": {
+            "type": "exact_length",
+            "value": 2,
+            "error_message": "5F40為查詢命令，無參數"
+        }
+    }, 
+    "5F10": {
+        "name": "目前控制策略管理",
+        "description": "設定目前控制策略之內容",
+        "reply_type": "設定",
+        "needs_ack": True,
+        "group": "5F",
+        "command": 0x10,
+        "log_modes": ["command"],
+        "fields": [
+            {
+                "name": "control_strategy",
+                "index": 2,
+                "type": "uint8",
+                "description": "控制策略",
+                "post_process": lambda value, result: {
+                    "raw": value,
+                    "fixed_time": bool(value & CS_FIXED_TIME),
+                    "dynamic": bool(value & CS_DYNAMIC),
+                    "intersection_manual": bool(value & CS_INTERSECTION_MANUAL),
+                    "central_manual": bool(value & CS_CENTRAL_MANUAL),
+                    "phase_control": bool(value & CS_PHASE_CONTROL),
+                    "immediate_control": bool(value & CS_IMMEDIATE_CONTROL),
+                    "actuated": bool(value & CS_ACTUATED),
+                    "special_route": bool(value & CS_SPECIAL_ROUTE),
+                }
+            },
+            {
+                "name": "effect_time",
+                "index": 3,
+                "type": "uint8",
+                "description": "動態控制策略有效時間（分鐘，0~255，0為不計時）"
+            }
+        ],
+        "validation": {
+            "type": "exact_length",
+            "value": 4,
+            "error_message": "5F10資料長度錯誤，應為 5F 10 + ControlStrategy + EffectTime"
+        }
+    },       
     "5F08": {
         "name": "現場操作回報",
         "description": "回報號誌控制器現場操作",
@@ -113,7 +194,7 @@ F5_GROUP_DEFINITIONS = {
         "needs_ack": False,
         "group": "5F",
         "command": 0x08,
-        
+        "log_modes": ["receive"],
         "fields": [
             {
                 "name": "現場操作碼",
@@ -138,6 +219,7 @@ F5_GROUP_DEFINITIONS = {
             "error_message": "5F08資料長度錯誤"
         }
     },
+
     "5F48": {
         "name": "目前時制計畫管理",
         "description": "查詢目前時制計畫內容",
@@ -145,7 +227,7 @@ F5_GROUP_DEFINITIONS = {
         "needs_ack": True,
         "group": "5F",
         "command": 0x48,
-        
+        "log_modes": ["command"],
         # 無訊息參數（只有命令碼 5F 48）
         "fields": [],
         
@@ -163,7 +245,7 @@ F5_GROUP_DEFINITIONS = {
         "needs_ack": True,
         "group": "5F",
         "command": 0xC8,
-        
+        "log_modes": ["receive", "command"],
         "fields": [
             {
                 "name": "時制計畫編號",
@@ -191,11 +273,12 @@ F5_GROUP_DEFINITIONS = {
             },
             {
                 "name": "各分相綠燈時間",
-                "index": 6,  # PAYLOAD[4] 開始
+                "index": 6,
                 "type": "list",
-                "item_type": "uint8",
-                "count_from": "sub_phase_count",  # 依賴 sub_phase_count
-                "description": "各分相綠燈時間"
+                "item_type": "uint16", 
+                "endian": "big",  # 添加：指定字節序
+                "count_from": "綠燈分相數", 
+                "description": "各分相綠燈時間（秒數，0~8190）"
             },
             {
                 "name": "週期秒數",
@@ -227,7 +310,7 @@ F5_GROUP_DEFINITIONS = {
         "needs_ack": True,
         "group": "5F",
         "command": 0xC6,
-        
+        "log_modes": ["receive","command"],
         "fields": [
             {
                 "name": "時段類型",

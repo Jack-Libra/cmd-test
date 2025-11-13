@@ -59,15 +59,15 @@ class UDPTransport:
             self.logger.error(f"接收數據失敗: {e}")
             return b"", None
     
-    def send_data(self, data: bytes) -> bool:
+    def send_data(self, data: bytes, addr: tuple) -> bool:
         """發送數據"""
         if not self.socket:
             self.logger.error("尚未開啟UDP連接")
             return False
-        
+        target_addr = addr if addr is not None else self.server_addr
         try:
-            self.socket.sendto(data, self.server_addr)
-            self.logger.debug(f"發送數據到 {self.server_addr[0]}:{self.server_addr[1]}")
+            self.socket.sendto(data, target_addr)
+            self.logger.info(f"發送數據到 {target_addr[0]}:{target_addr[1]}")
             return True
         except Exception as e:
             self.logger.error(f"發送數據失敗: {e}")

@@ -13,34 +13,22 @@ from .processor.packet_processor import PacketProcessor
 from core.frame import AckFrame
 from log_config.setup import get_logger
 import binascii
+
 class PacketRegistry:
     """封包處理註冊中心"""
     
-    def __init__(self):
-        self.logger = get_logger()
+    def __init__(self, mode: str = "receive"):
+        self.logger = get_logger(f"tc.{mode}")
         self.definitions = DefinitionRegistry()
-        self.parser = DataDrivenParser(self.definitions)
+        self.parser = DataDrivenParser(self.definitions, mode=mode)
         self.builder = DataDrivenBuilder(self.definitions)
-        self.processor = PacketProcessor(self.definitions)
+        self.processor = PacketProcessor(self.definitions, mode=mode)
         
         self.seq = 0
         self.seq_lock = threading.Lock()
-
+    
     def parse(self, packet: bytes):
         """解析封包"""
-        
-        result = self.parser.parse(packet)
-        if result:
-            self.logger.info("="*60)
-            self.logger.info("封包解析結果:"+"\n")
-            for key, value in result.items():
-                self.logger.info(f"{key}: {value}"+"\n")
-            self.logger.info("="*60+"\n")
-        else:
-            #frame_hex = binascii.hexlify(packet).decode('ascii')
-            #self.logger.error(f"封包解析失敗{frame_hex}")
-            #self.logger.error("="*60+"\n")
-            return 
         
         return self.parser.parse(packet)
     
@@ -80,34 +68,27 @@ class PacketRegistry:
         self.process(packet)
 
         # 獲取命令碼
-        command = packet.get("指令", "")
-        if not command:
-            command = packet.get("command", "")
+        command = packet.get("指令編號")
+
         
-        # 排除回應封包（0F80/0F81）不發送ACK
-        if command in ["0F80", "0F81", "設定/查詢回報（成功）", "設定/查詢回報（失敗）"]:
-            logger.debug(f"跳過ACK: {command} 為回應封包，不需要發送ACK")
-            return True
 
         # 如果需要ACK，發送ACK
         if not packet.get("needs_ack", False):
             return True
         
-        ack_frame = self.create_ack(packet["seq"], packet["addr"])
+        ack_frame = self.create_ack(packet["序列號"], packet["號誌控制器ID"])
         
-        if not ack_frame:
-            logger.error("ACK封包創建失敗")
-            return False
-        
-        if not addr:
-            logger.error("地址無效，無法發送ACK")
-            return False
-        
-        if network.send_data(ack_frame):
-            logger.debug(f"發送ACK: Seq={packet['seq']}, TC_ID={packet['addr']}")
-            return True
-        else:
-            logger.error("發送ACK失敗")
-            return False
+        try:
+            network.send_data(ack_frame, addr)
+            ack_hex = binascii.hexlify(ack_frame).decode('ascii').upper()
+            logger.info(
+                f"發送ACK: Seq=0x{packet['序列號']:02X}, "
+                f"TC_ID={packet['號誌控制器ID']:03d}, "
+                f"目標={addr[0]}:{addr[1]}, "
+                f"封包={ack_hex}, "
+                f"回應封包={command}"
+            )
+        except Exception as e:
+            logger.error(f"發送ACK失敗: {e}")
 
 

@@ -53,7 +53,7 @@ class FrameDecoder:
     
     @staticmethod
     def decode(frame: bytes) -> Dict:
-        """解碼幀"""
+        """解碼封包"""
         if not frame or len(frame) < 3:
             raise ValueError("封包長度不足")
         
@@ -102,27 +102,27 @@ class FrameDecoder:
 
 
 class MessageFrame:
-    """幀：DLE STX SEQ ADDR(2) LEN(2) INFO DLE ETX CKS"""
+    """封包：DLE STX SEQ ADDR(2) LEN(2) INFO DLE ETX CKS"""
     
     @staticmethod
     def encode(seq: int, addr: int, info: bytes) -> bytes:
-        """編碼幀"""
+        """編碼封包"""
         # DLE逸出
         payload = BaseCoder.escape_dle(info)
         
         # 計算長度：DLE(1) + STX(1) + SEQ(1) + ADDR(2) + LEN(2) + INFO + DLE(1) + ETX(1) + CKS(1)
         length = 10 + len(payload)
         
-        # 構建幀頭
+        # 構建封包頭
         header = struct.pack(">BBBHH", DLE, STX, _u8(seq), _u16(addr), _u16(length))
         
-        # 構建幀尾
+        # 構建封包尾
         footer = struct.pack(">BB", DLE, ETX)
         
         # 計算校驗和
         data_for_checksum = header + payload + footer
         
-        # 組裝完整幀
+        # 組裝完整封包
         return header + payload + footer + struct.pack(">B", BaseCoder.calculate_checksum(data_for_checksum))
 
 class AckFrame:
