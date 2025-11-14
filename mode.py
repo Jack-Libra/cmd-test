@@ -8,10 +8,9 @@
 import threading
 import time
 import datetime
-from typing import Dict
 from config.config import TCConfig
 from network.udp_transport import UDPTransport
-from packet.registry import PacketRegistry
+from packet.registry import PacketCenter
 from log_config.setup import setup_logging 
 import binascii
 
@@ -20,6 +19,7 @@ class Base:
     """基類：提供共同的初始化和接收功能"""
 
     def __init__(self, device_id=3, mode: str = "receive"):
+        self.mode = mode
         self.device_id = device_id
         
         
@@ -46,7 +46,7 @@ class Base:
         )
         
         # 初始化封包註冊中心
-        self.registry = PacketRegistry(mode=mode)
+        self.registry = PacketCenter(mode=mode)
         
         # 執行緒控制
         self.running = False
@@ -104,14 +104,14 @@ class Base:
         
         self.logger.info("接收線程已停止")
     
-    def _handle_received_packet(self, packet: Dict, addr: tuple):
+    def _handle_received_packet(self, packet, addr):
         """處理接收到的封包（子類實現）"""
         pass
 
 class Receive(Base):
     """接收模式：只接收數據，不發送命令"""
-    def __init__(self, device_id=3):
-        super().__init__(device_id, mode="receive")
+    def __init__(self, device_id=3, mode: str = "receive"):
+        super().__init__(device_id, mode)
 
     def start(self):
         """啟動接收模式"""
@@ -126,41 +126,28 @@ class Receive(Base):
         )
         self.receive_thread.start()
         
-        self.logger.info("接收模式已啟動")
+        try:
+            self.logger.info("接收模式已啟動")
+            self.receive_thread.join()
+        
+        except KeyboardInterrupt:
+            self.logger.info("\n接收模式已停止")
+        
+        finally:
+            self.stop()
+        
         return True
     
-    def _handle_received_packet(self, packet: Dict, addr: tuple):
+    def _handle_received_packet(self, packet, addr):
         """處理接收到的封包（覆寫基類方法，不發送ACK）"""
         if not packet:
             return
         
-        # 只處理封包
-        self.registry.process(packet)
-        #self.registry.process_and_ack(packet, self.network, addr, self.logger)
+        # 處理封包(並發送ACK)
+        #self.registry.process(packet)
+        self.registry.process_and_ack(packet, self.network, addr, self.logger)
         
-        #command = self._get_command(packet)
-        #seq = packet.get("序列號")
-        #self.logger.info(f"接收封包: {command} (Seq={seq}) - 不發送ACK")
     
-    def run(self):
-        """運行接收模式"""
-        try:
-            self.logger.info("開始接收資料（接收模式），按 Ctrl+C 結束...")
-            
-            # 等待接收線程
-            if self.receive_thread:
-                self.receive_thread.join()
-            else:
-                # 如果沒有線程，在主線程中運行
-                self._receive_loop()
-                
-        except KeyboardInterrupt:
-            self.logger.info("程式已手動停止")
-        except Exception as e:
-            self.logger.error(f"程式錯誤: {e}", exc_info=True)
-        finally:
-            self.stop()
-
 class Command(Base):
     """指令下傳介面類：接收+命令雙線程，使用 seq 追蹤命令狀態"""
     
@@ -171,8 +158,8 @@ class Command(Base):
         "5F18": "_execute_5f18_command",
     }
     
-    def __init__(self, device_id=3):
-        super().__init__(device_id, mode="command")
+    def __init__(self, device_id=3, mode="command"):
+        super().__init__(device_id, mode)
         
         # 指令追蹤
         self.pending_commands = {}  # {seq: command_info}
@@ -204,11 +191,17 @@ class Command(Base):
             daemon=True
         )
         self.command_thread.start()
+        try:
+            self.logger.info("命令模式已啟動")
+            self.command_thread.join()
+        except KeyboardInterrupt:
+            self.logger.info("\n命令模式已停止")
+        finally:
+            self.stop()
         
-        self.logger.info("指令下傳系統已啟動")
         return True
     
-    def _handle_received_packet(self, packet: Dict, addr: tuple):
+    def _handle_received_packet(self, packet, addr):
         """處理接收到的封包（覆寫基類方法）"""
         
         command = packet.get("指令編號")
@@ -219,10 +212,10 @@ class Command(Base):
             self._handle_command_response(packet, addr)
             self.registry.process_and_ack(packet, self.network, addr, self.logger)
         else:
-            # 處理封包並發送ACK（如果需要）
+            # 處理封包並發送ACK
             self.registry.process_and_ack(packet, self.network, addr, self.logger)
     
-    def _handle_command_response(self, packet: Dict, addr: tuple):
+    def _handle_command_response(self, packet, addr):
         """處理指令回應"""
         command = packet.get("指令編號")
         seq = packet.get("序列號")
@@ -240,7 +233,6 @@ class Command(Base):
             if is_success:
                 self._update_command_status(cmd_info, 'success')
                 self.logger.info(f"✓ 指令執行成功: {cmd_info['description']}")
-                print(f"✓ 指令執行成功: {cmd_info['description']}")
             elif is_failure:
                 error_code = packet.get("錯誤碼", 0)
                 self._update_command_status(cmd_info, 'failed', error_code)
@@ -248,14 +240,12 @@ class Command(Base):
                     f"✗ 指令執行失敗: {cmd_info['description']} "
                     f"(錯誤碼: 0x{error_code:02X})"
                 )
-                print(f"✗ 指令執行失敗: {cmd_info['description']} "
-                      f"(錯誤碼: 0x{error_code:02X})")
             
             # 移到歷史記錄
             self.command_history.append(cmd_info)
             del self.pending_commands[seq]
     
-    def _update_command_status(self, cmd_info: Dict, status: str, error_code: int = 0):
+    def _update_command_status(self, cmd_info, status, error_code=0):
         """更新指令狀態"""
         cmd_info['status'] = status
         cmd_info['response_time'] = datetime.datetime.now().isoformat()
@@ -286,7 +276,7 @@ class Command(Base):
             except KeyboardInterrupt:
                 break
             except Exception as e:
-                print(f"指令處理錯誤: {e}")
+                self.logger.info(f"指令處理錯誤: {e}")
         
         self.running = False
     
@@ -417,7 +407,7 @@ class Command(Base):
         except Exception as e:
             print(f"5F18 指令錯誤: {e}")
     
-    def _send_command(self, cmd_code: str, fields: dict, description: str, addr: int):
+    def _send_command(self, cmd_code, fields, description, addr):
         """發送指令封包"""
         try:
             # 獲取序列號

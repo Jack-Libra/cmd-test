@@ -2,11 +2,8 @@
 封包處理器
 """
 
-import logging
 import json
-from os import strerror
-from typing import Dict
-from ..definitions.registry import DefinitionRegistry
+from packet.packet_definition import PacketDefinition
 from log_config.setup import get_logger
 from core.utils import format_packet_display
 
@@ -28,9 +25,8 @@ class PacketProcessor:
     # 步階信息文件路徑
     STEP_INFO_FILE = 'logs/current_step.json'
 
-    def __init__(self, registry: DefinitionRegistry, mode: str = "receive"):
+    def __init__(self, mode="receive"):
         self.logger = get_logger(f"tc.{mode}")
-        self.registry = registry
         self.mode = mode
         # 命令到處理方法的映射
         self.handlers = {
@@ -45,12 +41,12 @@ class PacketProcessor:
         } 
         self.logger.info("封包處理器初始化完成")
     
-    def _should_log(self, command: str):
+    def _should_log(self, command):
         """判斷是否應該記錄日誌"""
-        definition = self.registry.get_definition(command)
+        definition = PacketDefinition().get_definition(cmd_code=command)
         return definition and self.mode in definition["log_modes"]
 
-    def process(self, packet: Dict):
+    def process(self, packet):
         """處理封包"""
         if not packet:
             return
@@ -79,7 +75,7 @@ class PacketProcessor:
 
 #=========5F群組封包處理=========
 
-    def _handle_5f03(self, packet: Dict):
+    def _handle_5f03(self, packet):
         """處理5F03封包（時相資料庫管理）"""
         phase_order = packet.get("phase_order", 0)
         sub_phase_id = packet.get("sub_phase_id", 0)
@@ -124,7 +120,7 @@ class PacketProcessor:
         
         return log_message
         
-    def _handle_5f0c(self, packet: Dict):
+    def _handle_5f0c(self, packet):
         """處理5F0C封包（時相步階變換控制管理）"""
         tc_id = packet.get("號誌控制器ID", 0)
         sub_phase_id = packet.get("sub_phase_id")
@@ -141,7 +137,7 @@ class PacketProcessor:
         return f"TC{tc_id:03d} 5F0C: 策略={strategy_desc} (0x{control_strategy:02X}), " \
                f"時相={sub_phase_id}, 步階={step_id}, 秒數={step_sec}"
     
-    def _handle_5fc0(self, packet: Dict):
+    def _handle_5fc0(self, packet):
         """處理5FC0封包（控制策略回報）"""
         tc_id = packet.get("號誌控制器ID", 0)
         control_strategy = packet.get("control_strategy")
@@ -153,7 +149,7 @@ class PacketProcessor:
         return f"TC{tc_id:03d} 5FC0: 控制策略回報 - {strategy_desc}, " \
                f"有效時間={effect_time}分鐘, 策略碼=0x{control_strategy:02X}"
 
-    def _handle_5f08(self, packet: Dict):
+    def _handle_5f08(self, packet):
         """處理5F08封包（號誌控制器現場操作）"""
         operation = packet.get("現場操作碼")
         fields = {
@@ -161,7 +157,7 @@ class PacketProcessor:
         }
         return format_packet_display(packet, "5F08", fields)
     
-    def _handle_5fc8(self, packet: Dict) -> str:
+    def _handle_5fc8(self, packet):
         """處理5FC8封包（時制計畫回報）"""
         plan_id = packet.get("時制計畫編號", 0)
         direct = packet.get("基準方向", 0)
@@ -191,7 +187,7 @@ class PacketProcessor:
 
 
 
-    def _get_strategy_desc(self, strategy_details: Dict) -> str:
+    def _get_strategy_desc(self, strategy_details):
         """獲取策略描述（共享方法）"""
         result = []
         for key, desc in self.STRATEGY_MAP.items():
@@ -200,7 +196,7 @@ class PacketProcessor:
         
         return "、".join(result) if result else "無設定策略"
     
-    def _load_step_sec(self) -> int:
+    def _load_step_sec(self):
         """讀取步階秒數（共享方法）"""
         try:
             with open(self.STEP_INFO_FILE, 'r') as f:
@@ -213,7 +209,7 @@ class PacketProcessor:
 
 #=========0F群組封包處理=========
 
-    def _handle_0f04(self, packet: Dict) -> str:
+    def _handle_0f04(self, packet):
         """處理0F04封包（設備硬體狀態管理）"""
         hardware_status = packet.get("hardware_status", 0)
         hardware_status_list = packet.get("hardware_status", [])  # 已經是格式化字符串列表
@@ -236,7 +232,7 @@ class PacketProcessor:
         
         return log_message
 
-    def _handle_0f80(self, packet: Dict) -> str:
+    def _handle_0f80(self, packet):
         """處理0F80封包（設定回報-成功）"""
         command_id = packet.get("command_id", 0)
         
@@ -250,7 +246,7 @@ class PacketProcessor:
             "狀態": "設定成功"
         })
 
-    def _handle_0f81(self, packet: Dict) -> str:
+    def _handle_0f81(self, packet):
         """處理0F81封包（設定/查詢回報-失敗）"""
         command_id = packet.get("command_id", 0)
         error_code = packet.get("error_code", 0)

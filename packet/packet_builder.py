@@ -1,17 +1,79 @@
 """
-字段構建器
+封包構建器
 """
 
-from typing import Dict, Any, List
-from ..definitions.registry import DefinitionRegistry
+import logging
+from core.frame import MessageFrame
+from packet.packet_definition import PacketDefinition
+
+
+class PacketBuilder:
+    """封包構建器"""
+    
+    def __init__(self):
+        self.logger = logging.getLogger(__name__)
+        self.field_builder = FieldBuilder()
+    
+    def build(self, cmd_code, fields, seq=1, addr=0):
+        """構建封包"""
+        try:
+            definition = PacketDefinition().get_definition(cmd_code=cmd_code)
+            if not definition:
+                self.logger.error(f"未找到封包定義: {cmd_code}")
+                return None
+            
+            # 構建PAYLOAD字段
+            payload = self._build_payload(definition, fields)
+            if payload is None:
+                return None
+            
+            # 構建完整封包
+            packet = MessageFrame.encode(seq, addr, payload)
+            return packet
+            
+        except Exception as e:
+            self.logger.error(f"構建封包失敗: {e}", exc_info=True)
+            return None
+    
+    def _build_payload(self, definition, fields):
+        """構建PAYLOAD字段"""
+        payload = bytearray()
+        
+        # 添加群組碼和命令碼
+        group = definition.get("group")
+        command = definition.get("command")
+        
+        if group == "5F":
+            payload.append(0x5F)
+        elif group == "0F":
+            payload.append(0x0F)
+        else:
+            self.logger.error(f"未知群组: {group}")
+            return None
+        
+        payload.append(command)
+        
+        # 構建靜態字段
+        if "fields" in definition:
+            field_data = self.field_builder.build_fields(fields=definition["fields"], data=fields)
+            payload.extend(field_data)
+        
+        # 構建動態字段
+        if "dynamic_fields" in definition:
+            dynamic_data = self.field_builder.build_dynamic_fields(
+                dynamic_fields=definition["dynamic_fields"], data=fields
+            )
+            payload.extend(dynamic_data)
+        
+        return bytes(payload)
 
 class FieldBuilder:
     """字段構建器"""
     
-    def __init__(self, registry: DefinitionRegistry):
-        self.registry = registry
+    def __init__(self):
+        self.definitions = PacketDefinition
     
-    def build_fields(self, fields: List[Dict], data: Dict) -> bytes:
+    def build_fields(self, fields, data):
         """構建字段數據"""
         result = bytearray()
         
@@ -22,7 +84,7 @@ class FieldBuilder:
             
             if field_name in data:
                 value = data[field_name]
-                type_def = self.registry.get_field_type(field_type)
+                type_def = PacketDefinition().get_field_type(field_type=field_type)
                 
                 if type_def:
                     builder = type_def["builder"]
@@ -34,7 +96,7 @@ class FieldBuilder:
         
         return bytes(result)
     
-    def build_dynamic_fields(self, dynamic_fields: Dict, data: Dict) -> bytes:
+    def build_dynamic_fields(self, dynamic_fields, data):
         """構建動態字段數據"""
         result = bytearray()
         
@@ -48,7 +110,7 @@ class FieldBuilder:
             if field_type == "list":
                 # 列表類型
                 item_type = field_def.get("item_type", "uint8")
-                type_def = self.registry.get_field_type(item_type)
+                type_def = PacketDefinition().get_field_type(field_type=item_type)
                 
                 if type_def and isinstance(value, list):
                     builder = type_def["builder"]
@@ -69,7 +131,7 @@ class FieldBuilder:
                             field_type_in_item = field["type"]
                             
                             if field_name_in_item in item:
-                                type_def = self.registry.get_field_type(field_type_in_item)
+                                type_def = PacketDefinition().get_field_type(field_type=field_type_in_item)
                                 if type_def:
                                     builder = type_def["builder"]
                                     item_value = item[field_name_in_item]
@@ -81,7 +143,7 @@ class FieldBuilder:
             
             else:
                 # 單個字段
-                type_def = self.registry.get_field_type(field_type)
+                type_def = PacketDefinition().get_field_type(field_type=field_type)
                 if type_def:
                     builder = type_def["builder"]
                     if field_type == "uint16":
@@ -91,4 +153,3 @@ class FieldBuilder:
                         result.extend(builder(value))
         
         return bytes(result)
-

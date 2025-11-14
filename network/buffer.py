@@ -12,7 +12,7 @@ class PacketBuffer:
         self.buffer = bytearray()
         self.logger = logging.getLogger(__name__)
     
-    def feed(self, data: bytes) -> list:
+    def feed(self, data):
         """喂入數據，返回完整封包列表"""
         self.buffer.extend(data)
         packets = []

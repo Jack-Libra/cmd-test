@@ -3,8 +3,8 @@
 """
 
 from typing import Dict, Optional
-from .group_5f import F5_GROUP_DEFINITIONS
-from .group_0f import F0_GROUP_DEFINITIONS
+from packet.definitions.group_5f import F5_GROUP_DEFINITIONS
+from packet.definitions.group_0f import F0_GROUP_DEFINITIONS
 
 # 字段類型定義
 FIELD_TYPES = {
@@ -30,8 +30,8 @@ FIELD_TYPES = {
 
 
 
-class DefinitionRegistry:
-    """定義註冊表"""
+class PacketDefinition:
+    """封包定義註冊表"""
     
     def __init__(self):
         self.definitions = {

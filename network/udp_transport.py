@@ -5,21 +5,20 @@ UDP傳輸層
 
 import socket
 import logging
-from typing import Optional
 from .buffer import PacketBuffer
 
 class UDPTransport:
     """UDP傳輸層"""
     
-    def __init__(self, local_ip: str, local_port: int, 
-                 server_ip: str, server_port: int):
+    def __init__(self, local_ip, local_port, 
+                 server_ip, server_port):
         self.local_addr = (local_ip, local_port)
         self.server_addr = (server_ip, server_port)
-        self.socket: Optional[socket.socket] = None
+        self.socket = None
         self.buffer = PacketBuffer()
         self.logger = logging.getLogger(__name__)
     
-    def open(self) -> bool:
+    def open(self):
         """開啟UDP連接"""
         if self.socket:
             self.close()
@@ -28,10 +27,7 @@ class UDPTransport:
             self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             
             self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1) # 允許重複使用地址
-            
-            
-            
-            
+                     
             self.socket.bind(self.local_addr)
             self.socket.settimeout(1.0)
             self.buffer.buffer.clear()
@@ -62,7 +58,7 @@ class UDPTransport:
             self.logger.error(f"接收數據失敗: {e}")
             return b"", None
     
-    def send_data(self, data: bytes, addr: tuple) -> bool:
+    def send_data(self, data, addr):
         """發送數據"""
         if not self.socket:
             self.logger.error("尚未開啟UDP連接")
@@ -76,6 +72,6 @@ class UDPTransport:
             self.logger.error(f"發送數據失敗: {e}")
             return False
     
-    def process_buffer(self, data: bytes) -> list:
+    def process_buffer(self, data):
         """處理緩衝區數據，返回完整封包列表"""
         return self.buffer.feed(data)

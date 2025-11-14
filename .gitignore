@@ -41,3 +41,6 @@ Thumbs.db
 # 项目特定
 current_step.json
 
+# Python cache
+*/__pycache__/
+*/.pytest_cache/
