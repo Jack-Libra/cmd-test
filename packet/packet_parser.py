@@ -1,5 +1,5 @@
 """
-資料驅動封包解析器
+封包解析器
 """
 import binascii
 from utils import FrameDecoder
@@ -7,12 +7,12 @@ from packet.packet_definition import PacketDefinition
 from config.log_setup import get_logger
 import datetime
 
-class PacketParser():
+class PacketParser:
     """封包解析器"""
     
     def __init__(self,  mode="receive"):
         self.logger = get_logger(f"tc.{mode}")
-        self.field_parser = UnifiedFieldParser()
+        self.sub_parser = SubParser()
         self.frame_decoder = FrameDecoder()
     
     def parse(self, frame):
@@ -99,19 +99,20 @@ class PacketParser():
         
         # 解析payload字段
         if "fields" in definition:
-            result = self.field_parser.parse_fields(
+            result = self.sub_parser.parse_fields(
                 payload, definition["fields"], result
             )     
         return result
-    
-class UnifiedFieldParser:
-    """統一字段解析器"""
+
+
+class SubParser:
+    """子解析器"""
     
     def __init__(self):
         self.definitions = PacketDefinition
     
     def parse_fields(self, payload, fields, result):
-        """解析payload字段（統一處理）"""
+        """解析子字段"""
         current_index = 0  # 當前 PAYLOAD 索引位置
         
         for field in fields:
@@ -185,7 +186,21 @@ class UnifiedFieldParser:
     
     def _parse_list(self, payload, field, index, result):
         """解析列表字段"""
-        count = result.get(field.get("count_from", ""), 0)
+        count_from = field.get("count_from", "")
+        
+        # 支持多種 count_from 類型
+        if callable(count_from):
+            # 如果是可調用對象（lambda 或函數），直接調用
+            count = count_from(result)
+        elif isinstance(count_from, str):
+            # 是字段名，直接獲取
+            count = result.get(count_from, 0)
+        elif isinstance(count_from, int):
+            # 直接是數字
+            count = count_from
+        else:
+            count = 0
+            
         item_type = field.get("item_type", "uint8")
         items = []
         

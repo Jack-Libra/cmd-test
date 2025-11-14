@@ -1,5 +1,7 @@
 """
-定義註冊表
+封包定義
+
+負責定義封包的格式和解析方式
 """
 
 from typing import Dict, Optional
@@ -31,7 +33,7 @@ FIELD_TYPES = {
 
 
 class PacketDefinition:
-    """封包定義註冊表"""
+    """封包定義"""
     
     def __init__(self):
         self.definitions = {

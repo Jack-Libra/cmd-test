@@ -2,6 +2,8 @@
 0F 群组封包定义
 """
 from utils import int_to_binary_list
+from config.constants import HARDWARE_STATUS_MAP,ERROR_CODE_CONFIG
+
 
 def format_0f04_hardware_status(hardware_status):
     """格式化0F04硬體狀態為字符串列表"""
@@ -11,34 +13,16 @@ def format_0f04_hardware_status(hardware_status):
     status_bits = int_to_binary_list(low_byte) + int_to_binary_list(high_byte)
     
     formatted_lines = []
-    status_map = [
-        (0, "CPU模組錯誤"),
-        (1, "記憶體錯誤"),
-        (2, "計時器錯誤"),
-        (3, "看門狗計時器錯誤"),
-        (4, "電源錯誤（AC 80V~130V 之外）"),
-        (5, "I/O單元錯誤（DI/O故障：行人觸動、子機連鎖）"),
-        (6, "信號驅動單元錯誤"),
-        (7, "信號頭錯誤"),
-        (8, "通訊連接"),
-        (9, "機櫃開啟"),
-        (10, "時制計畫錯誤"),
-        (11, "信號衝突錯誤"),
-        (12, "信號電源錯誤"),
-        (13, "時制計畫轉換中"),
-        (14, "控制器就緒"),
-        (15, "通訊線路不良（框架錯誤）")
-    ]
-    
-    for bit_pos, description in status_map:
+      
+    for bit_pos, description in HARDWARE_STATUS_MAP:
         if bit_pos < len(status_bits) and status_bits[bit_pos]:
             formatted_lines.append(f"   狀態 {bit_pos}: {description}")
     
-    # 如果沒有任何錯誤，顯示正常
     if not formatted_lines:
         formatted_lines.append("   狀態: 系統正常")
     
     return formatted_lines
+
 def format_0f81_error_code(error_code, result=None):
     """格式化0F81錯誤碼為字符串列表"""
     param_num = result.get("param_num", 0) if result else 0
@@ -46,28 +30,18 @@ def format_0f81_error_code(error_code, result=None):
     
     formatted_lines = []
     
-    if errors.get("invalid_msg"):
-        formatted_lines.append("   錯誤: 無此訊息")
-    if errors.get("no_response"):
-        formatted_lines.append("   錯誤: 無法回應資料")
-    if errors.get("param_invalid"):
-        formatted_lines.append(f"   錯誤: 參數值無效(位置:{param_num})")
-    if errors.get("no_param"):
-        formatted_lines.append(f"   錯誤: 位元組總參數數目錯誤(錯誤值:{param_num})")
-    if errors.get("prep_error"):
-        formatted_lines.append("   錯誤: 設備類別錯誤")
-    if errors.get("timeout"):
-        formatted_lines.append("   錯誤: 逾時")
-    if errors.get("exceed_limit"):
-        formatted_lines.append(f"   錯誤: 參數值超過硬體限制(位置:{param_num})")
-    if errors.get("reported"):
-        formatted_lines.append("   錯誤: 已被訊息等級設定排除")
+    for key, _, description, param_formatter in ERROR_CODE_CONFIG:
+        if errors.get(key):
+            error_text = description
+            if param_formatter:
+                error_text = f"{error_text}({param_formatter(param_num)})"
+            formatted_lines.append(f"   錯誤: {error_text}")
     
-    # 如果沒有任何錯誤描述，顯示未知錯誤
     if not formatted_lines:
         formatted_lines.append(f"   錯誤: 未知錯誤(錯誤碼:0x{error_code:02X})")
     
     return formatted_lines
+    
 def process_0f81_errors(error_code):
     """處理0F81錯誤碼"""
     return {

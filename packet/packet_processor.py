@@ -5,22 +5,11 @@
 import json
 from packet.packet_definition import PacketDefinition
 from config.log_setup import get_logger
+from config.constants import format_control_strategy_desc
 from utils import format_packet_display
 
 class PacketProcessor:
     """封包處理器"""
-    
-    # 策略描述映射（共享）
-    STRATEGY_MAP = {
-        "fixed_time": "定時控制",
-        "dynamic": "動態控制",
-        "intersection_manual": "路口手動",
-        "central_manual": "中央手動",
-        "phase_control": "時相控制",
-        "immediate_control": "即時控制",
-        "actuated": "觸動控制",
-        "special_route": "特別路線控制"
-    }
     
     # 步階信息文件路徑
     STEP_INFO_FILE = 'logs/current_step.json'
@@ -30,10 +19,14 @@ class PacketProcessor:
         self.mode = mode
         # 命令到處理方法的映射
         self.handlers = {
+            "5F00": self._handle_5f00, #主動回報
             "5F03": self._handle_5f03, #主動回報
             "5F0C": self._handle_5f0c, #主動回報
-            "5FC0": self._handle_5fc0, #主動回報
             "5F08": self._handle_5f08, #主動回報
+            "5F13": self._handle_5f13, #設定
+            "5F43": self._handle_5f43, #查詢
+            "5FC0": self._handle_5fc0, #查詢回報
+            "5FC3": self._handle_5fc3, #查詢回報
             "5FC8": self._handle_5fc8, #查詢回報
             "0F04": self._handle_0f04,
             "0F80": self._handle_0f80,
@@ -74,6 +67,31 @@ class PacketProcessor:
             self.logger.warning(f"封包內容: {packet}")
 
 #=========5F群組封包處理=========
+
+    def _handle_5f00(self, packet):
+        """處理5F00封包（控制策略自動回報）"""
+        # 獲取 control_strategy（是一個字典，包含 raw 和策略位）
+        control_strategy_dict = packet.get("control_strategy", {})
+        control_strategy_raw = control_strategy_dict.get("raw", 0) if isinstance(control_strategy_dict, dict) else packet.get("control_strategy", 0)
+        
+        # 提取策略詳情（排除 raw 鍵）
+        if isinstance(control_strategy_dict, dict):
+            strategy_details = {k: v for k, v in control_strategy_dict.items() if k != "raw"}
+        else:
+            strategy_details = {}
+        
+        begin_end = packet.get("begin_end", "")
+        
+        # 構建策略描述
+        strategy_desc = format_control_strategy_desc(strategy_details)
+        
+        # 構建字段字典
+        fields = {
+            "控制策略": f"{strategy_desc} (0x{control_strategy_raw:02X})",
+            "狀態": begin_end if begin_end else "未知"
+        }
+        
+        return format_packet_display(packet, "5F00", fields)
 
     def _handle_5f03(self, packet):
         """處理5F03封包（時相資料庫管理）"""
@@ -119,35 +137,130 @@ class PacketProcessor:
             log_message = "\n".join(lines)
         
         return log_message
+
+    def _handle_5f13(self, packet):
+        """處理5F13封包（設定時相排列）"""
+        phase_order = packet.get("phase_order", 0)
+        signal_map = packet.get("號誌位置圖", "")
+        signal_count = packet.get("signal_count", 0)
+        sub_phase_count = packet.get("sub_phase_count", 0)
+        signal_status_list = packet.get("信號狀態列表", [])
         
+        # 構建字段字典
+        fields = {
+            "時相編號": f"{phase_order:02X}",
+            "號誌位置圖": signal_map,
+            "信號燈數量": signal_count,
+            "綠燈分相數目": sub_phase_count,
+        }
+        
+        log_message = format_packet_display(packet, "5F13", fields)
+        
+        # 添加信號狀態列表（如果已經是格式化字符串列表）
+        if isinstance(signal_status_list, list) and signal_status_list:
+            lines = log_message.split("\n")
+            # 在 "原始資料" 之前插入
+            insert_pos = len(lines) - 1
+            for status_line in reversed(signal_status_list):
+                lines.insert(insert_pos, str(status_line))
+            log_message = "\n".join(lines)
+        
+        return log_message
+
+    def _handle_5f43(self, packet):
+        """處理5F43封包（查詢時相排列）"""
+        phase_order = packet.get("phase_order", 0)
+        
+        fields = {
+            "時相編號": f"{phase_order:02X}"
+        }
+        
+        return format_packet_display(packet, "5F43", fields)
+
+    def _handle_5fc3(self, packet):
+        """處理5FC3封包（時相排列回報）"""
+        phase_order = packet.get("phase_order", 0)
+        signal_map = packet.get("號誌位置圖", "")
+        signal_count = packet.get("signal_count", 0)
+        sub_phase_count = packet.get("sub_phase_count", 0)
+        signal_status_list = packet.get("信號狀態列表", [])
+        
+        # 構建字段字典
+        fields = {
+            "時相編號": f"{phase_order:02X}",
+            "號誌位置圖": signal_map,
+            "信號燈數量": signal_count,
+            "綠燈分相數目": sub_phase_count,
+        }
+        
+        log_message = format_packet_display(packet, "5FC3", fields)
+        
+        # 添加信號狀態列表（如果已經是格式化字符串列表）
+        if isinstance(signal_status_list, list) and signal_status_list:
+            lines = log_message.split("\n")
+            # 在 "原始資料" 之前插入
+            insert_pos = len(lines) - 1
+            for status_line in reversed(signal_status_list):
+                lines.insert(insert_pos, str(status_line))
+            log_message = "\n".join(lines)
+        
+        return log_message
+
     def _handle_5f0c(self, packet):
         """處理5F0C封包（時相步階變換控制管理）"""
-        tc_id = packet.get("號誌控制器ID", 0)
-        sub_phase_id = packet.get("sub_phase_id")
-        step_id = packet.get("step_id")
-        control_strategy = packet.get("control_strategy")
-        strategy_details = packet.get("control_strategy_details", {})
+        # 獲取 control_strategy（是一個字典，包含 raw 和策略位）
+        control_strategy_dict = packet.get("control_strategy", {})
+        control_strategy_raw = control_strategy_dict.get("raw", 0) if isinstance(control_strategy_dict, dict) else packet.get("control_strategy", 0)
+        
+        # 提取策略詳情（排除 raw 鍵）
+        if isinstance(control_strategy_dict, dict):
+            strategy_details = {k: v for k, v in control_strategy_dict.items() if k != "raw"}
+        else:
+            strategy_details = {}
+        
+        sub_phase_id = packet.get("sub_phase_id", 0)
+        step_id = packet.get("step_id", 0)
         
         # 從 current_step.json 讀取步階秒數
         step_sec = self._load_step_sec()
         
         # 構建策略描述
-        strategy_desc = self._get_strategy_desc(strategy_details)
+        strategy_desc = format_control_strategy_desc(strategy_details)
         
-        return f"TC{tc_id:03d} 5F0C: 策略={strategy_desc} (0x{control_strategy:02X}), " \
-               f"時相={sub_phase_id}, 步階={step_id}, 秒數={step_sec}"
+        # 構建字段字典
+        fields = {
+            "控制策略": f"{strategy_desc} (0x{control_strategy_raw:02X})",
+            "分相序號": sub_phase_id,
+            "步階序號": step_id,
+            "步階秒數": f"{step_sec} 秒" if step_sec > 0 else "未知"
+        }
+        
+        return format_packet_display(packet, "5F0C", fields)
     
     def _handle_5fc0(self, packet):
         """處理5FC0封包（控制策略回報）"""
-        tc_id = packet.get("號誌控制器ID", 0)
-        control_strategy = packet.get("control_strategy")
-        effect_time = packet.get("effect_time")
-        strategy_details = packet.get("control_strategy_details", {})
+        # 獲取 control_strategy（是一個字典，包含 raw 和策略位）
+        control_strategy_dict = packet.get("control_strategy", {})
+        control_strategy_raw = control_strategy_dict.get("raw", 0) if isinstance(control_strategy_dict, dict) else packet.get("control_strategy", 0)
         
-        strategy_desc = self._get_strategy_desc(strategy_details)
+        # 提取策略詳情（排除 raw 鍵）
+        if isinstance(control_strategy_dict, dict):
+            strategy_details = {k: v for k, v in control_strategy_dict.items() if k != "raw"}
+        else:
+            strategy_details = {}
         
-        return f"TC{tc_id:03d} 5FC0: 控制策略回報 - {strategy_desc}, " \
-               f"有效時間={effect_time}分鐘, 策略碼=0x{control_strategy:02X}"
+        effect_time = packet.get("effect_time", 0)
+        
+        # 構建策略描述
+        strategy_desc = format_control_strategy_desc(strategy_details)
+        
+        # 構建字段字典
+        fields = {
+            "控制策略": f"{strategy_desc} (0x{control_strategy_raw:02X})",
+            "有效時間": f"{effect_time} 分鐘" if effect_time > 0 else "不計時"
+        }
+        
+        return format_packet_display(packet, "5FC0", fields)
 
     def _handle_5f08(self, packet):
         """處理5F08封包（號誌控制器現場操作）"""
@@ -186,16 +299,6 @@ class PacketProcessor:
         return format_packet_display(packet, "5FC8", fields)
 
 
-
-    def _get_strategy_desc(self, strategy_details):
-        """獲取策略描述（共享方法）"""
-        result = []
-        for key, desc in self.STRATEGY_MAP.items():
-            if strategy_details.get(key, False):
-                result.append(desc)
-        
-        return "、".join(result) if result else "無設定策略"
-    
     def _load_step_sec(self):
         """讀取步階秒數（共享方法）"""
         try:

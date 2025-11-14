@@ -1,5 +1,5 @@
 """
-封包處理註冊中心
+封包處理中心
 統一管理解析器、構建器、處理器
 """
 
@@ -12,7 +12,7 @@ from config.log_setup import get_logger
 import binascii
 
 class PacketCenter:
-    """封包處理註冊中心"""
+    """封包處理中心"""
     
     def __init__(self, mode="receive"):
         self.logger = get_logger(f"tc.{mode}")

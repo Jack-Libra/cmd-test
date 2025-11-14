@@ -3,10 +3,8 @@
 """
 
 from utils import int_to_binary_list
-from config.constants import (
-    CS_FIXED_TIME, CS_DYNAMIC, CS_INTERSECTION_MANUAL, CS_CENTRAL_MANUAL,
-    CS_PHASE_CONTROL, CS_IMMEDIATE_CONTROL, CS_ACTUATED, CS_SPECIAL_ROUTE
-)
+from config.constants import process_control_strategy,FIELD_OPERATION_MAP,BEGIN_END_STATUS_MAP
+
 
 def format_5f03_signal_status(signal_status_list, result=None):
     """
@@ -69,21 +67,12 @@ def format_5f03_signal_status(signal_status_list, result=None):
     
     return formatted_statuses
 
-def process_5fc0_control_strategy(control_strategy):
-    """處理5FC0控制策略位"""
-    return {
-        "fixed_time": bool(control_strategy & CS_FIXED_TIME),
-        "dynamic": bool(control_strategy & CS_DYNAMIC),
-        "intersection_manual": bool(control_strategy & CS_INTERSECTION_MANUAL),
-        "central_manual": bool(control_strategy & CS_CENTRAL_MANUAL),
-        "phase_control": bool(control_strategy & CS_PHASE_CONTROL),
-        "immediate_control": bool(control_strategy & CS_IMMEDIATE_CONTROL),
-        "actuated": bool(control_strategy & CS_ACTUATED),
-        "special_route": bool(control_strategy & CS_SPECIAL_ROUTE),
-    }
+
 
 # 5F 群組封包定義
 F5_GROUP_DEFINITIONS = {
+
+# =============時相資料庫管理=============    
     "5F03": {
         "name": "時相資料庫管理",
         "description": "主動回報號誌控制器步階轉換之資料",
@@ -131,6 +120,104 @@ F5_GROUP_DEFINITIONS = {
             "error_message": "5F03資料長度不足"
         }
     },
+
+    "5F13": {
+        "name": "時相資料庫管理",
+        "description": "設定號誌控制器時相排列",
+        "reply_type": "設定",
+        "needs_ack": True,
+        "group": "5F",
+        "command": 0x13,
+        "log_modes": ["command"],
+        
+        "fields": [
+            {"name": "phase_order", "index": 2, "type": "uint8", "description": "時相編號"},
+            {
+                "name": "號誌位置圖",
+                "index": 3,
+                "type": "uint8",
+                "description": "號誌位置圖",
+                "post_process": lambda value, result: f"0x{value:02X} = {int_to_binary_list(value)}"
+            },
+            {"name": "signal_count", "index": 4, "type": "uint8", "description": "信號燈數量"},
+            {"name": "sub_phase_count", "index": 5, "type": "uint8", "description": "綠燈分相數目"},
+            {
+                "name": "信號狀態列表",
+                "index": 6,
+                "type": "list",
+                "item_type": "uint8",
+                "count_from": lambda result: result.get("signal_count", 0) * result.get("sub_phase_count", 0),
+                "description": "信號狀態列表（每個分相包含 SignalCount 個狀態，共 SubPhaseCount 個分相）",
+                "post_process": format_5f03_signal_status
+            }
+        ],
+        
+        "validation": {
+            "type": "min_length",
+            "value": 6,
+            "error_message": "5F13資料長度不足"
+        }
+    },
+
+    "5F43": {
+        "name": "時相資料庫管理",
+        "description": "查詢號誌控制器之時相排列",
+        "reply_type": "查詢",
+        "needs_ack": True,
+        "group": "5F",
+        "command": 0x43,
+        "log_modes": ["command"],
+        
+        "fields": [
+            {"name": "phase_order", "index": 2, "type": "uint8", "description": "時相編號"}
+        ],
+        
+        "validation": {
+            "type": "exact_length",
+            "value": 3,
+            "error_message": "5F43資料長度錯誤，應為 5F 43 + PhaseOrder"
+        }
+    },
+
+    "5FC3": {
+        "name": "時相資料庫管理",
+        "description": "回報號誌控制器之時相排列",
+        "reply_type": "查詢回報",
+        "needs_ack": True,
+        "group": "5F",
+        "command": 0xC3,
+        "log_modes": ["receive", "command"],
+        
+        "fields": [
+            {"name": "phase_order", "index": 2, "type": "uint8", "description": "時相編號"},
+            {
+                "name": "號誌位置圖",
+                "index": 3,
+                "type": "uint8",
+                "description": "號誌位置圖",
+                "post_process": lambda value, result: f"0x{value:02X} = {int_to_binary_list(value)}"
+            },
+            {"name": "signal_count", "index": 4, "type": "uint8", "description": "信號燈數量"},
+            {"name": "sub_phase_count", "index": 5, "type": "uint8", "description": "綠燈分相數目"},
+            {
+                "name": "信號狀態列表",
+                "index": 6,
+                "type": "list",
+                "item_type": "uint8",
+                "count_from": lambda result: result.get("signal_count", 0) * result.get("sub_phase_count", 0),
+                "description": "信號狀態列表（每個分相包含 SignalCount 個狀態，共 SubPhaseCount 個分相）",
+                "post_process": format_5f03_signal_status
+            }
+        ],
+        
+        "validation": {
+            "type": "min_length",
+            "value": 6,
+            "error_message": "5FC3資料長度不足"
+        }
+    },    
+
+# =============目前控制策略管理=============    
     "5F40": {
         "name": "目前控制策略管理",
         "description": "查詢目前控制策略之設定內容",
@@ -148,6 +235,7 @@ F5_GROUP_DEFINITIONS = {
             "error_message": "5F40為查詢命令，無參數"
         }
     }, 
+
     "5F10": {
         "name": "目前控制策略管理",
         "description": "設定目前控制策略之內容",
@@ -164,14 +252,7 @@ F5_GROUP_DEFINITIONS = {
                 "description": "控制策略",
                 "post_process": lambda value, result: {
                     "raw": value,
-                    "fixed_time": bool(value & CS_FIXED_TIME),
-                    "dynamic": bool(value & CS_DYNAMIC),
-                    "intersection_manual": bool(value & CS_INTERSECTION_MANUAL),
-                    "central_manual": bool(value & CS_CENTRAL_MANUAL),
-                    "phase_control": bool(value & CS_PHASE_CONTROL),
-                    "immediate_control": bool(value & CS_IMMEDIATE_CONTROL),
-                    "actuated": bool(value & CS_ACTUATED),
-                    "special_route": bool(value & CS_SPECIAL_ROUTE),
+                    **process_control_strategy(value)
                 }
             },
             {
@@ -186,7 +267,78 @@ F5_GROUP_DEFINITIONS = {
             "value": 4,
             "error_message": "5F10資料長度錯誤，應為 5F 10 + ControlStrategy + EffectTime"
         }
-    },       
+    },
+    
+    "5FC0": {
+        "name": "目前控制策略管理",
+        "description": "回報目前控制策略之內容",
+        "reply_type": "查詢回報",
+        "needs_ack": True,
+        "group": "5F",
+        "command": 0xC0,
+        "log_modes": ["receive", "command"],
+        "fields": [
+            {
+                "name": "control_strategy",
+                "index": 2,
+                "type": "uint8",
+                "description": "控制策略",
+                "post_process": lambda value, result: {
+                    "raw": value,
+                    **process_control_strategy(value)
+                }
+            },
+            {
+                "name": "effect_time",
+                "index": 3,
+                "type": "uint8",
+                "description": "動態控制策略有效時間（分鐘，0~255，0為不計時）"
+            }
+        ],
+        "validation": {
+            "type": "exact_length",
+            "value": 4,
+            "error_message": "5FC0資料長度錯誤，應為 5F C0 + ControlStrategy + EffectTime"
+        }
+    },
+
+    "5F00": {
+        "name": "目前控制策略管理",
+        "description": "自動回報控制策略之目前執行內容",
+        "reply_type": "主動回報",
+        "needs_ack": True,
+        "group": "5F",
+        "command": 0x00,
+        "log_modes": ["receive"],
+        
+        "fields": [
+            {
+                "name": "control_strategy",
+                "index": 2,
+                "type": "uint8",
+                "description": "控制策略（只回報目前執行之控制策略的對應位元資料）",
+                "post_process": lambda value, result: {
+                    "raw": value,
+                    **process_control_strategy(value)
+                }
+            },
+            {
+                "name": "begin_end",
+                "index": 3,
+                "type": "uint8",
+                "description": "控制策略狀態",
+                "mapping": BEGIN_END_STATUS_MAP
+            }
+        ],
+        
+        "validation": {
+            "type": "exact_length",
+            "value": 4,
+            "error_message": "5F00資料長度錯誤，應為 5F 00 + ControlStrategy + BeginEnd"
+        }
+    },
+    
+# =============現場操作回報=============    
     "5F08": {
         "name": "現場操作回報",
         "description": "回報號誌控制器現場操作",
@@ -200,14 +352,8 @@ F5_GROUP_DEFINITIONS = {
                 "name": "現場操作碼",
                 "index": 2,  # PAYLOAD[0]
                 "type": "uint8",
-                "description": "現場操作碼",
-                # 自定義映射
-                "mapping": {
-                    0x01: "現場手動",
-                    0x02: "現場全紅",
-                    0x40: "現場閃光",
-                    0x80: "上次現場操作回復"
-                },
+                "description": "現場操作碼",             
+                "mapping": FIELD_OPERATION_MAP,
                 # 後處理：格式化輸出
                 #"post_process": lambda value, result: f"0x{value:02X}H ({result.get('_mapping_desc', '未知')})"
             }
@@ -220,6 +366,7 @@ F5_GROUP_DEFINITIONS = {
         }
     },
 
+# =============目前時制計畫管理=============    
     "5F48": {
         "name": "目前時制計畫管理",
         "description": "查詢目前時制計畫內容",
@@ -302,7 +449,8 @@ F5_GROUP_DEFINITIONS = {
             "error_message": "5FC8資料長度不足"
         }
     },
-    
+
+# =============一般日時段型態管理=============    
     "5FC6": {
         "name": "一般日時段型態查詢回報",
         "description": "週內日時段切分內容",
@@ -358,6 +506,46 @@ F5_GROUP_DEFINITIONS = {
             "value": 5,
             "error_message": "5FC6資料長度不足"
         }
-    }
+    },
+
+# =============時相步階變換控制管理=============    
+    "5F0C": {
+        "name": "時相步階變換控制管理",
+        "description": "主動回報號誌控制器現行時相及步階",
+        "reply_type": "主動回報",
+        "needs_ack": True,
+        "group": "5F",
+        "command": 0x0C,
+        "log_modes": ["receive"],
+        "fields": [
+            {
+                "name": "control_strategy",
+                "index": 2,
+                "type": "uint8",
+                "description": "控制策略",
+                "post_process": lambda value, result: {
+                    "raw": value,
+                    **process_control_strategy(value)
+                }
+            },
+            {
+                "name": "sub_phase_id",
+                "index": 3,
+                "type": "uint8",
+                "description": "分相序號"
+            },
+            {
+                "name": "step_id",
+                "index": 4,
+                "type": "uint8",
+                "description": "步階序號"
+            }
+        ],
+        "validation": {
+            "type": "exact_length",
+            "value": 5,
+            "error_message": "5F0C資料長度錯誤，應為 5F 0C + ControlStrategy + SubPhaseID + StepID"
+        }
+    },
 }
 

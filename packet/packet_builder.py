@@ -1,5 +1,7 @@
 """
 封包構建器
+
+負責構建封包，並返回構建結果
 """
 
 import logging
@@ -12,7 +14,7 @@ class PacketBuilder:
     
     def __init__(self):
         self.logger = logging.getLogger(__name__)
-        self.field_builder = FieldBuilder()
+        self.sub_builder = SubBuilder()
     
     def build(self, cmd_code, fields, seq=1, addr=0):
         """構建封包"""
@@ -55,26 +57,27 @@ class PacketBuilder:
         
         # 構建靜態字段
         if "fields" in definition:
-            field_data = self.field_builder.build_fields(fields=definition["fields"], data=fields)
+            field_data = self.sub_builder.build_fields(fields=definition["fields"], data=fields)
             payload.extend(field_data)
         
         # 構建動態字段
         if "dynamic_fields" in definition:
-            dynamic_data = self.field_builder.build_dynamic_fields(
+            dynamic_data = self.sub_builder.build_dynamic_fields(
                 dynamic_fields=definition["dynamic_fields"], data=fields
             )
             payload.extend(dynamic_data)
         
         return bytes(payload)
 
-class FieldBuilder:
-    """字段構建器"""
+
+class SubBuilder:
+    """子構建器"""
     
     def __init__(self):
         self.definitions = PacketDefinition
     
     def build_fields(self, fields, data):
-        """構建字段數據"""
+        """構建子字段數據"""
         result = bytearray()
         
         # 先構建固定字段
@@ -97,7 +100,7 @@ class FieldBuilder:
         return bytes(result)
     
     def build_dynamic_fields(self, dynamic_fields, data):
-        """構建動態字段數據"""
+        """構建子動態字段數據"""
         result = bytearray()
         
         for field_name, field_def in dynamic_fields.items():

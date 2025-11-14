@@ -12,6 +12,7 @@ from config.config import TCConfig
 from config.network import UDPTransport
 from packet.registry import PacketCenter
 from config.log_setup import setup_logging 
+from config.commands import COMMAND_METADATA, COMMAND_HANDLERS, COMMANDS_BY_CATEGORY
 import binascii
 
 
@@ -151,12 +152,7 @@ class Receive(Base):
 class Command(Base):
     """指令下傳介面類：接收+命令雙線程，使用 seq 追蹤命令狀態"""
     
-    COMMAND_HANDLERS = {
-        "5F40": "_execute_5f40_command",
-        "5F10": "_execute_5f10_command",
-        "5F48": "_execute_5f48_command",
-        "5F18": "_execute_5f18_command",
-    }
+    COMMAND_HANDLERS = COMMAND_HANDLERS  # 從 config.commands 導入
     
     def __init__(self, device_id=3, mode="command"):
         super().__init__(device_id, mode)
@@ -280,24 +276,55 @@ class Command(Base):
         
         self.running = False
     
+    # ========== 工具方法 ==========
+    
+    def _parse_hex_or_int(self, value_str, param_name="值"):
+        """
+        解析十六進制或十進制字符串
+        
+        Args:
+            value_str: 輸入字符串
+            param_name: 參數名稱（用於錯誤提示）
+        
+        Returns:
+            (value, error_message) - 成功返回 (值, None)，失敗返回 (None, 錯誤信息)
+        """
+        try:
+            if value_str.startswith('0x') or value_str.startswith('0X'):
+                return int(value_str, 16), None
+            elif all(c in '0123456789ABCDEFabcdef' for c in value_str):
+                return int(value_str, 16), None
+            else:
+                return int(value_str), None
+        except ValueError:
+            return None, f"{param_name} 格式錯誤: {value_str}"
+    
+    def _validate_range(self, value, min_val, max_val, param_name="值"):
+        """驗證值是否在範圍內"""
+        if not (min_val <= value <= max_val):
+            return False, f"{param_name} 超出範圍 (0x{min_val:02X}~0x{max_val:02X} 或 {min_val}~{max_val}): {value}"
+        return True, None
+    
     def _show_help(self):
-        """顯示說明"""
+        """顯示說明（自動從元數據生成）"""
         print(f"交通控制系統指令下傳介面 - TC{self.tc_id:03d}")
         print(f"可用指令:")
         print(f"  help     - 顯示此說明")
         print(f"  status   - 顯示系統狀態")
         print(f"  history  - 顯示指令歷史")
         print(f"  quit     - 退出程式")
-        print(f"指令下傳格式:")
-        print(f"  5F40                    - 查詢控制策略")
-        print(f"  5F10 <strategy> <time>  - 設定控制策略")
-        print(f"  5F48                    - 查詢時制計畫")
-        print(f"  5F18 <planId>           - 選擇時制計畫")
-        print(f"範例:")
-        print(f"  5F40")
-        print(f"  5F10 1 60")
-        print(f"  5F48")
-        print(f"  5F18 1")
+        
+        # 按類別顯示命令
+        for category, commands in COMMANDS_BY_CATEGORY.items():
+            if commands:
+                print(f"\n{category}指令:")
+                for cmd_code in sorted(commands):
+                    meta = COMMAND_METADATA[cmd_code]
+                    print(f"  {meta['format']:<45} - {meta['description']}")
+        
+        print(f"\n範例:")
+        for cmd_code, meta in sorted(COMMAND_METADATA.items()):
+            print(f"  {meta['example']}")
         
     def _show_status(self):
         """顯示系統狀態"""
@@ -348,28 +375,45 @@ class Command(Base):
                 handler(parts[1:])
             else:
                 print(f"不支援的指令類型: {cmd_type}")
+                print(f"可用指令: {', '.join(sorted(COMMAND_METADATA.keys()))}")
+                print(f"輸入 'help' 查看詳細說明")
         
         except Exception as e:
             print(f"指令執行錯誤: {e}")   
 
     def _execute_5f40_command(self, args):
         """執行 5F40 指令（查詢控制策略）"""
+        meta = COMMAND_METADATA["5F40"]
         try:
-            # 5F40 無參數
-            self._send_command("5F40", {}, "查詢控制策略", addr=self.tc_id)
+            self._send_command("5F40", {}, meta["description"], addr=self.tc_id)
         except Exception as e:
             print(f"5F40 指令錯誤: {e}")
     
     def _execute_5f10_command(self, args):
         """執行 5F10 指令（設定控制策略）"""
-        if len(args) < 2:
-            print("5F10 指令參數不足")
-            print("格式: 5F10 <controlStrategy> <effectTime>")
+        meta = COMMAND_METADATA["5F10"]
+        
+        if len(args) < len(meta["params"]):
+            print(f"5F10 指令參數不足")
+            print(f"格式: {meta['format']}")
+            print(f"範例: {meta['example']}")
             return
         
         try:
             control_strategy = int(args[0])
             effect_time = int(args[1])
+            
+            # 使用元數據定義驗證範圍
+            param_defs = meta["params"]
+            valid, error = self._validate_range(control_strategy, param_defs[0]["range"][0], param_defs[0]["range"][1], "控制策略")
+            if not valid:
+                print(error)
+                return
+            
+            valid, error = self._validate_range(effect_time, param_defs[1]["range"][0], param_defs[1]["range"][1], "有效時間")
+            if not valid:
+                print(error)
+                return
             
             fields = {
                 "control_strategy": control_strategy,
@@ -379,34 +423,174 @@ class Command(Base):
             self._send_command(
                 "5F10",
                 fields,
-                f"設定控制策略 (策略:0x{control_strategy:02X}, 時間:{effect_time}分鐘)",
+                f"{meta['description']} (策略:0x{control_strategy:02X}, 時間:{effect_time}分鐘)",
                 addr=self.tc_id
             )
+        except ValueError as e:
+            print(f"5F10 指令參數錯誤: {e}")
         except Exception as e:
             print(f"5F10 指令錯誤: {e}")
     
     def _execute_5f48_command(self, args):
         """執行 5F48 指令（查詢時制計畫）"""
+        meta = COMMAND_METADATA["5F48"]
         try:
-            # 5F48 無參數
-            self._send_command("5F48", {}, "查詢目前時制計畫內容", addr=self.tc_id)
+            self._send_command("5F48", {}, meta["description"], addr=self.tc_id)
         except Exception as e:
             print(f"5F48 指令錯誤: {e}")
     
     def _execute_5f18_command(self, args):
         """執行 5F18 指令（選擇時制計畫）"""
-        if len(args) < 1:
-            print("5F18 指令參數不足")
-            print("格式: 5F18 <planId>")
+        meta = COMMAND_METADATA["5F18"]
+        
+        if len(args) < len(meta["params"]):
+            print(f"5F18 指令參數不足")
+            print(f"格式: {meta['format']}")
+            print(f"範例: {meta['example']}")
             return
         
         try:
             plan_id = int(args[0])
+            
+            # 使用元數據定義驗證範圍
+            param_def = meta["params"][0]
+            valid, error = self._validate_range(plan_id, param_def["range"][0], param_def["range"][1], "時制計畫編號")
+            if not valid:
+                print(error)
+                return
+            
             fields = {"plan_id": plan_id}
-            self._send_command("5F18", fields, f"選擇時制計畫 (計畫ID:{plan_id})", addr=self.tc_id)
+            self._send_command("5F18", fields, f"{meta['description']} (計畫ID:{plan_id})", addr=self.tc_id)
+        except ValueError as e:
+            print(f"5F18 指令參數錯誤: {e}")
         except Exception as e:
             print(f"5F18 指令錯誤: {e}")
+
+    def _execute_5f43_command(self, args):
+        """執行 5F43 指令（查詢時相排列）"""
+        meta = COMMAND_METADATA["5F43"]
+        
+        if len(args) < len(meta["params"]):
+            print(f"5F43 指令參數不足")
+            print(f"格式: {meta['format']}")
+            print(f"範例: {meta['example']}")
+            return
+        
+        try:
+            # 解析參數
+            phase_order, error = self._parse_hex_or_int(args[0], "時相編號")
+            if error:
+                print(error)
+                return
+            
+            # 驗證範圍
+            param_def = meta["params"][0]
+            valid, error = self._validate_range(phase_order, param_def["range"][0], param_def["range"][1], "時相編號")
+            if not valid:
+                print(error)
+                return
+            
+            fields = {"phase_order": phase_order}
+            
+            self._send_command(
+                "5F43",
+                fields,
+                f"{meta['description']} (時相編號:0x{phase_order:02X})",
+                addr=self.tc_id
+            )
+        except Exception as e:
+            print(f"5F43 指令錯誤: {e}")
     
+    def _execute_5f13_command(self, args):
+        """執行 5F13 指令（設定時相排列）"""
+        meta = COMMAND_METADATA["5F13"]
+        
+        # 驗證基本參數數量（前4個固定參數）
+        if len(args) < 4:
+            print(f"5F13 指令參數不足")
+            print(f"格式: {meta['format']}")
+            print(f"範例: {meta['example']}")
+            return
+        
+        try:
+            # 解析前4個基本參數
+            phase_order, error = self._parse_hex_or_int(args[0], "時相編號")
+            if error:
+                print(error)
+                return
+            
+            signal_map, error = self._parse_hex_or_int(args[1], "號誌位置圖")
+            if error:
+                print(error)
+                return
+            
+            signal_count = int(args[2])
+            sub_phase_count = int(args[3])
+            
+            # 驗證參數範圍（使用元數據定義）
+            param_defs = meta["params"]
+            valid, error = self._validate_range(phase_order, param_defs[0]["range"][0], param_defs[0]["range"][1], "時相編號")
+            if not valid:
+                print(error)
+                return
+            
+            valid, error = self._validate_range(signal_map, param_defs[1]["range"][0], param_defs[1]["range"][1], "號誌位置圖")
+            if not valid:
+                print(error)
+                return
+            
+            valid, error = self._validate_range(signal_count, param_defs[2]["range"][0], param_defs[2]["range"][1], "信號燈數量")
+            if not valid:
+                print(error)
+                return
+            
+            valid, error = self._validate_range(sub_phase_count, param_defs[3]["range"][0], param_defs[3]["range"][1], "綠燈分相數目")
+            if not valid:
+                print(error)
+                return
+            
+            # 解析信號狀態列表
+            expected_status_count = signal_count * sub_phase_count
+            if len(args) < 4 + expected_status_count:
+                print(f"信號狀態列表參數不足")
+                print(f"需要 {expected_status_count} 個狀態值 (signalCount * subPhaseCount)")
+                print(f"實際提供: {len(args) - 4} 個")
+                return
+            
+            signal_status_list = []
+            for i in range(4, 4 + expected_status_count):
+                status, error = self._parse_hex_or_int(args[i], f"信號狀態[{i-4}]")
+                if error:
+                    print(error)
+                    return
+                
+                valid, error = self._validate_range(status, 0, 0xFF, f"信號狀態[{i-4}]")
+                if not valid:
+                    print(error)
+                    return
+                
+                signal_status_list.append(status)
+            
+            fields = {
+                "phase_order": phase_order,
+                "號誌位置圖": signal_map,
+                "signal_count": signal_count,
+                "sub_phase_count": sub_phase_count,
+                "信號狀態列表": signal_status_list
+            }
+            
+            self._send_command(
+                "5F13",
+                fields,
+                f"{meta['description']} (時相:0x{phase_order:02X}, 方向:{signal_count}, 分相:{sub_phase_count})",
+                addr=self.tc_id
+            )
+        except ValueError as e:
+            print(f"5F13 指令參數錯誤: {e}")
+            print("請檢查參數格式是否正確")
+        except Exception as e:
+            print(f"5F13 指令錯誤: {e}")
+                
     def _send_command(self, cmd_code, fields, description, addr):
         """發送指令封包"""
         try:

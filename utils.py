@@ -41,8 +41,6 @@ class BaseCoder:
             checksum ^= byte
         return checksum & 0xFF
 
-
-
 class FrameDecoder:
     """封包通用解碼器"""
     
@@ -94,7 +92,6 @@ class FrameDecoder:
             }
         else:
             raise ValueError(f"未知封包類型: {frame[1]:02X}")
-
 
 class MessageFrame:
     """封包：DLE STX SEQ ADDR(2) LEN(2) INFO DLE ETX CKS"""
@@ -154,7 +151,6 @@ def _u16(x: int) -> int:
     if not (0 <= x <= 0xFFFF):
         raise ValueError(f"u16 range error: {x}")
     return x
-
 
 def format_packet_display(packet: dict, command: str, 
                          fields: dict) -> str:
