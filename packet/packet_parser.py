@@ -2,9 +2,9 @@
 資料驅動封包解析器
 """
 import binascii
-from core.frame import FrameDecoder
+from utils import FrameDecoder
 from packet.packet_definition import PacketDefinition
-from log_config.setup import get_logger
+from config.log_setup import get_logger
 import datetime
 
 class PacketParser():

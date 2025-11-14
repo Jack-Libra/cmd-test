@@ -1,76 +1,69 @@
-# 交通控制系统 - 数据驱动设计版本
+# 交通控制系統
 
-## 项目结构
+## 項目結構
 
 ```
-traffic_control_dd/
-├── config/              # 配置模块
-│   ├── config.py        # 配置管理
-│   └── constants.py     # 常量定义
-├── core/                # 核心功能模块
-│   ├── frame.py         # 帧编解码
-│   ├── checksum.py      # 校验和计算
-│   └── utils.py         # 工具函数
-├── packet/              # 封包处理模块（核心）
-│   ├── definitions/     # 封包定义（数据驱动核心）
-│   ├── parser/          # 解析器
-│   ├── builder/         # 构建器
-│   ├── processor/       # 处理器
-│   └── registry.py      # 注册中心
-├── network/             # 网络通信模块
-│   ├── udp_transport.py # UDP传输层
-│   └── buffer.py        # 缓冲区管理
-├── logging/             # 日志模块
-│   └── setup.py         # 日志配置
-└── main.py              # 主程序入口
+traffic_control/
+├── main.py # 主程序入口
+├── mode.py # 運行模式管理（Receive, Command）
+├── utils.py # 共用工具函數
+│
+├── config/ # 配置環境相關
+│ ├── config.py # 配置管理器
+│ ├── constants.py # 協議常量定義
+│ ├── network.py # 網路層
+│ └── log_setup.py # 日誌配置
+│
+├── packet/  # 核心模組
+│ ├── registry.py # 封包中心
+│ ├── packet_parser.py # 封包解析器
+│ ├── packet_builder.py # 封包建構器
+│ ├── packet_processor.py # 封包處理器
+│ ├── packet_definition.py # 封包定義
+│ └── definitions/
+│ ├────── group_5f.py # 5F 群組定義
+│ └────── group_0f.py # 0F 群組定義
+│
+└── logs/ 
+├── receive.log # 接收模式日誌
+└── command.log # 命令模式日誌
 ```
 
-## 设计特点
+## 特點
+1. **雙模式+日誌隔離**：日誌根據不同模式記錄不同封包
 
-1. **数据驱动设计**：封包格式定义与解析逻辑分离
-2. **模块化架构**：职责清晰，易于维护
-3. **易于扩展**：添加新封包类型只需添加定义
-4. **类型安全**：定义清晰，减少错误
 
-## 使用方法
+## 運行模式
+- **Receive 模式**：只接收數據包，紀錄日誌，發送ACK
+python main.py --mode receive
 
-```python
-from packet import PacketRegistry
+- **Command 模式**：接收數據包 + 命令下傳，紀錄日誌
+python main.py --mode command
 
-# 获取注册中心
-registry = PacketRegistry()
 
-# 解析封包
-packet = registry.parse(frame_bytes)
+## 支持的封包類型
 
-# 构建封包
-frame = registry.build("5F10", {
-    "control_strategy": 1,
-    "effect_time": 60
-}, seq=1, addr=3)
+### 5F 群組（號控）
+- **5F03**: 時相資料庫管理（主動回報）
+- **5F08**: 現場操作回報（主動回報）
+- **5F0C**: 時相步階變換控制管理（主動回報）
+- **5F10**: 目前控制策略管理（設定）
+- **5F40**: 目前控制策略管理（查询）
+- **5F48**: 目前時制計畫管理（查询）
+- **5FC0**: 控制策略回報（主動回報）
+- **5FC6**: 一般日時段型態查詢回報
+- **5FC8**: 時制計畫回報（查詢回報）
 
-# 处理封包
-registry.process(packet)
-```
+### 0F 群組（共用）
+- **0F04**: 設備硬體狀態管理（主動回報）
+- **0F80**: 設定回報（有效）
+- **0F81**: 設定/查詢回報（無效）
+- **0FC0**: 查詢現場設備編號回報
+- **0F02**: 回報終端設備現場手動更改時間
 
-## 运行
 
-```bash
-python main.py
-```
 
-## 支持的封包类型
+## 待實現
 
-- 5F03: 時相資料維管理
-- 5F0C: 時相步階變換控制管理
-- 5FC0: 控制策略回報
-- 5F00: 主動回報
-- 5FC8: 時制計畫回報
-- 5F08: 現場操作回報
-- 5FC6: 一般日時段型態查詢回報
-- 0F80: 設定回報（有效）
-- 0F81: 設定/查詢回報（無效）
-- 0F04: 系統狀態回報
-- 0FC0: 查詢現場設備編號回報
-- 0F02: 回報終端設備現場手動更改時間
-
+- **共享接收線程**
+- **UDP代理**

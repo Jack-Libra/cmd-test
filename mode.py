@@ -9,9 +9,9 @@ import threading
 import time
 import datetime
 from config.config import TCConfig
-from network.udp_transport import UDPTransport
+from config.network import UDPTransport
 from packet.registry import PacketCenter
-from log_config.setup import setup_logging 
+from config.log_setup import setup_logging 
 import binascii
 
 

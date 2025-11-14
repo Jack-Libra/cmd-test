@@ -2,7 +2,7 @@
 5F 群組封包定義
 """
 
-from core.utils import int_to_binary_list
+from utils import int_to_binary_list
 from config.constants import (
     CS_FIXED_TIME, CS_DYNAMIC, CS_INTERSECTION_MANUAL, CS_CENTRAL_MANUAL,
     CS_PHASE_CONTROL, CS_IMMEDIATE_CONTROL, CS_ACTUATED, CS_SPECIAL_ROUTE

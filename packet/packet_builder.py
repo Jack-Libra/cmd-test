@@ -3,7 +3,7 @@
 """
 
 import logging
-from core.frame import MessageFrame
+from utils import MessageFrame
 from packet.packet_definition import PacketDefinition
 
 

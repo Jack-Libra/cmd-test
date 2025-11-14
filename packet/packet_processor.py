@@ -4,8 +4,8 @@
 
 import json
 from packet.packet_definition import PacketDefinition
-from log_config.setup import get_logger
-from core.utils import format_packet_display
+from config.log_setup import get_logger
+from utils import format_packet_display
 
 class PacketProcessor:
     """封包處理器"""

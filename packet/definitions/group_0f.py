@@ -1,7 +1,7 @@
 """
 0F 群组封包定义
 """
-from core.utils import int_to_binary_list
+from utils import int_to_binary_list
 
 def format_0f04_hardware_status(hardware_status):
     """格式化0F04硬體狀態為字符串列表"""
