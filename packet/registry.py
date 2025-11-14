@@ -47,11 +47,6 @@ class PacketRegistry:
     def get_definition(self, cmd_code: str):
         """獲取封包定義"""
         return self.definitions.get_definition(cmd_code)
-    
-    def register_definition(self, cmd_code: str, definition: Dict):
-        """註冊新封包定義"""
-        self.definitions.register_definition(cmd_code, definition)
-        self.logger.info(f"註冊新封包定義: {cmd_code}")
 
     def next_seq(self):
         """獲取下一個序列號（線程安全）"""
@@ -60,7 +55,7 @@ class PacketRegistry:
             return self.seq
 
     def process_and_ack(self, packet: Dict, network, addr: tuple, logger):
-        """處理封包並發送ACK（如果需要）"""
+        """處理封包並發送ACK"""
         if not packet:
             return False
         
@@ -70,24 +65,25 @@ class PacketRegistry:
         # 獲取命令碼
         command = packet.get("指令編號")
 
-        
-
         # 如果需要ACK，發送ACK
         if not packet.get("needs_ack", False):
             return True
-        
+        logger.info(f"{'='*60}")
+        logger.info(f"處理封包: {packet}")
+        logger.info(f"{'='*60}")
+
         ack_frame = self.create_ack(packet["序列號"], packet["號誌控制器ID"])
         
         try:
             network.send_data(ack_frame, addr)
             ack_hex = binascii.hexlify(ack_frame).decode('ascii').upper()
-            logger.info(
-                f"發送ACK: Seq=0x{packet['序列號']:02X}, "
-                f"TC_ID={packet['號誌控制器ID']:03d}, "
-                f"目標={addr[0]}:{addr[1]}, "
-                f"封包={ack_hex}, "
-                f"回應封包={command}"
-            )
+            logger.info(f"{'='*60}")
+            logger.info(f"發送ACK: Seq=0x{packet['序列號']:02X}, ")
+            logger.info(f"TC_ID={packet['號誌控制器ID']:03d}, ")
+            logger.info(f"目標={addr[0]}:{addr[1]}, ")
+            logger.info(f"封包={ack_hex}, ")
+            logger.info(f"回應封包={command}")
+            logger.info(f"{'='*60}")
         except Exception as e:
             logger.error(f"發送ACK失敗: {e}")
 

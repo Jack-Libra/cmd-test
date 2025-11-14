@@ -29,6 +29,9 @@ class UDPTransport:
             
             self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1) # 允許重複使用地址
             
+            
+            
+            
             self.socket.bind(self.local_addr)
             self.socket.settimeout(1.0)
             self.buffer.buffer.clear()

@@ -20,6 +20,7 @@ class DataDrivenParser():
     def parse(self, frame: bytes):
         """解析封包"""
         try:
+            
             decoded = self.frame_decoder.decode(frame)
             
             # ACK 框處理
@@ -43,7 +44,7 @@ class DataDrivenParser():
     
     def _parse_stx(self, decoded: Dict, frame: bytes):
         """解析 STX 框"""
-        payload = decoded["payload"]  # 純淨的 INFO 數據
+        payload = decoded["payload"]  
         
         if len(payload) < 2:
             return None
@@ -56,16 +57,27 @@ class DataDrivenParser():
         # 查找定義
         definition = self.registry.get_definition(cmd_code)
         
-        if not definition:            
-            #self.logger.error(f"未定義的指令碼: {cmd_code}")
-            #self.logger.error(f"封包內容: {binascii.hexlify(frame).decode('ascii')}")
-            return
-        
         header = {
         "序列號": decoded["seq"],
         "addr": decoded["addr"],
         "len": decoded["len"]
-        }
+        }        
+        
+        # 未定義的指令碼(包含5F80)
+        if not definition:            
+            #self.logger.error(f"未定義的指令碼: {cmd_code}")
+            #self.logger.error(f"封包內容: {binascii.hexlify(frame).decode('ascii')}")
+            result = {
+                "序列號": decoded["seq"],
+                "號誌控制器ID": decoded["addr"],
+                "欄位長度": decoded["len"],
+                "指令編號": cmd_code,
+                "原始封包": binascii.hexlify(frame).decode('ascii'),
+                "接收時間": datetime.datetime.now().isoformat()
+            }
+            
+            
+            return result
         
         # 解析封包
         return self._parse_by_definition(definition, header, payload, cmd_code, frame)

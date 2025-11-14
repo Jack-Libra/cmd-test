@@ -14,6 +14,8 @@ from network.udp_transport import UDPTransport
 from packet.registry import PacketRegistry
 from log_config.setup import setup_logging 
 import binascii
+
+
 class Base:
     """基類：提供共同的初始化和接收功能"""
 
@@ -26,7 +28,7 @@ class Base:
             "receive": "receive.log",
             "command": "command.log",
         }
-        log_file = log_file_map.get(mode, "traffic_control.log")
+        log_file = log_file_map.get(mode, "receive.log")
         
         # 初始化日誌
         self.logger = setup_logging(log_file=log_file, mode=mode)
@@ -51,10 +53,7 @@ class Base:
         self.receive_thread = None
         
         self.logger.info(f"系統初始化完成 - {mode}模式")
-    def _get_command(self, packet: Dict) -> str:
-        """獲取封包的命令碼（統一方法）"""
-        return packet.get("指令編號", "")
-    
+
 
     def start(self):
         """啟動系統（子類可覆寫）"""
@@ -107,8 +106,7 @@ class Base:
     
     def _handle_received_packet(self, packet: Dict, addr: tuple):
         """處理接收到的封包（子類實現）"""
-        # 基類默認處理：處理封包並發送ACK
-        self.registry.process_and_ack(packet, self.network, addr, self.logger)
+        pass
 
 class Receive(Base):
     """接收模式：只接收數據，不發送命令"""
@@ -136,9 +134,9 @@ class Receive(Base):
         if not packet:
             return
         
-        # 只處理封包，不發送ACK
+        # 只處理封包
         self.registry.process(packet)
-
+        #self.registry.process_and_ack(packet, self.network, addr, self.logger)
         
         #command = self._get_command(packet)
         #seq = packet.get("序列號")
@@ -212,22 +210,22 @@ class Command(Base):
     
     def _handle_received_packet(self, packet: Dict, addr: tuple):
         """處理接收到的封包（覆寫基類方法）"""
-        if not packet:
-            return
         
-        command = self._get_command(packet)
+        command = packet.get("指令編號")
         
-        # 檢查是否為指令回應（0F80/0F81）
+        # 檢查是否為指令回應（0F80/0F81/5F80/5F81）
         if command in ["0F80", "0F81"]:
+            self.logger.info(f"處理 {command} 封包: {packet}")
             self._handle_command_response(packet, addr)
-        
-        # 處理封包並發送ACK（如果需要）
-        self.registry.process_and_ack(packet, self.network, addr, self.logger)
+            self.registry.process_and_ack(packet, self.network, addr, self.logger)
+        else:
+            # 處理封包並發送ACK（如果需要）
+            self.registry.process_and_ack(packet, self.network, addr, self.logger)
     
     def _handle_command_response(self, packet: Dict, addr: tuple):
         """處理指令回應"""
-        command = self._get_command(packet)
-        seq = packet.get("序列號", 0)
+        command = packet.get("指令編號")
+        seq = packet.get("序列號")
         
         with self.pending_lock:
             if seq not in self.pending_commands:
@@ -236,8 +234,8 @@ class Command(Base):
             cmd_info = self.pending_commands[seq]
             
             # 判斷成功或失敗
-            is_success = command in ["設定/查詢回報（成功）", "0F80"]
-            is_failure = command in ["設定/查詢回報（失敗）", "0F81"]
+            is_success = command in ["設定/查詢回報（成功）", "0F80", "5F80"]
+            is_failure = command in ["設定/查詢回報（失敗）", "0F81", "5F81"]
             
             if is_success:
                 self._update_command_status(cmd_info, 'success')

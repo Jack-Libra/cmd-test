@@ -25,16 +25,9 @@ FIELD_TYPES = {
         "size": None,  # 動態大小
         "parser": lambda data, offset, length: data[offset:offset+length] if offset + length <= len(data) else b"",
         "builder": lambda value: value if isinstance(value, bytes) else bytes(value)
-    }
+    }   
 }
 
-# 驗證器類型
-VALIDATORS = {
-    "min_length": lambda data, length: len(data) >= length,
-    "exact_length": lambda data, length: len(data) == length,
-    "max_length": lambda data, length: len(data) <= length,
-    "custom": lambda data, func: func(data) if func else True
-}
 
 
 class DefinitionRegistry:
@@ -46,23 +39,16 @@ class DefinitionRegistry:
             **F0_GROUP_DEFINITIONS
         }
         self.field_types = FIELD_TYPES
-        self.validators = VALIDATORS
     
     def get_definition(self, cmd_code: str) -> Optional[Dict]:
         """獲取封包定義"""
         return self.definitions.get(cmd_code)
     
-    def register_definition(self, cmd_code: str, definition: Dict):
-        """註冊新封包定義"""
-        self.definitions[cmd_code] = definition
     
     def get_field_type(self, field_type: str) -> Optional[Dict]:
         """獲取字段類型定義"""
         return self.field_types.get(field_type)
     
-    def get_validator(self, validator_type: str):
-        """獲取驗證器"""
-        return self.validators.get(validator_type)
 
 
 
