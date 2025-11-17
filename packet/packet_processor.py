@@ -14,9 +14,10 @@ class PacketProcessor:
     # 步階信息文件路徑
     STEP_INFO_FILE = 'logs/current_step.json'
 
-    def __init__(self, mode="receive"):
+    def __init__(self, mode="receive", packet_def=None):
         self.logger = get_logger(f"tc.{mode}")
         self.mode = mode
+        self.packet_def = PacketDefinition()
         # 命令到處理方法的映射
         self.handlers = {
             "5F00": self._handle_5f00, #主動回報
@@ -34,7 +35,7 @@ class PacketProcessor:
     
     def _should_log(self, command):
         """判斷是否應該記錄日誌"""
-        definition = PacketDefinition().get_definition(cmd_code=command)
+        definition = self.packet_def.get_definition(cmd_code=command)
         return definition and self.mode in definition["log_modes"]
 
     def process(self, packet):

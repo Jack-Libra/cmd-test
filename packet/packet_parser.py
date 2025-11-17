@@ -12,7 +12,8 @@ class PacketParser:
     
     def __init__(self,  mode="receive"):
         self.logger = get_logger(f"tc.{mode}")
-        self.sub_parser = SubParser()
+        self.packet_def = PacketDefinition()
+        self.sub_parser = SubParser(packet_def=self.packet_def)
         self.frame_decoder = FrameDecoder()
     
     def parse(self, frame):
@@ -53,7 +54,7 @@ class PacketParser:
         cmd_code = f"{command_prefix:02X}{command_suffix:02X}"
         
         # 查找定義
-        definition = PacketDefinition().get_definition(cmd_code=cmd_code)
+        definition = self.packet_def.get_definition(cmd_code=cmd_code)
         
         header = {
         "序列號": decoded["seq"],
@@ -108,8 +109,8 @@ class PacketParser:
 class SubParser:
     """子解析器"""
     
-    def __init__(self):
-        self.definitions = PacketDefinition
+    def __init__(self, packet_def):
+        self.packet_def = packet_def
     
     def parse_fields(self, payload, fields, result):
         """解析子字段"""
@@ -161,28 +162,16 @@ class SubParser:
         field_type = field["type"]
         
         if field_type == "uint8":
-            return self._parse_uint8(payload, index)
+            return payload[index]
         elif field_type == "uint16":
             endian = field.get("endian", "big")
-            return self._parse_uint16(payload, index, endian)
+            return int.from_bytes(payload[index:index+2], endian)
         elif field_type == "list":
             return self._parse_list(payload, field, index, result)
         elif field_type == "struct_list":
             return self._parse_struct_list(payload, field, index, result)
         else:
             return None
-    
-    def _parse_uint8(self, payload, index):
-        """解析 uint8"""
-        if index >= len(payload):
-            return None
-        return payload[index]
-    
-    def _parse_uint16(self, payload, index, endian="big"):
-        """解析 uint16"""
-        if index + 1 >= len(payload):
-            return None
-        return int.from_bytes(payload[index:index+2], endian)
     
     def _parse_list(self, payload, field, index, result):
         """解析列表字段"""
@@ -204,7 +193,7 @@ class SubParser:
         item_type = field.get("item_type", "uint8")
         items = []
         
-        type_def = PacketDefinition().get_field_type(field_type=item_type)
+        type_def = self.packet_def.get_field_type(field_type=item_type)
         if not type_def:
             return items
         
@@ -214,9 +203,9 @@ class SubParser:
             if item_index + item_size <= len(payload):
                 if item_type == "uint16":
                     endian = field.get("endian", "big")
-                    items.append(self._parse_uint16(payload, item_index, endian))
+                    items.append(int.from_bytes(payload[item_index:item_index+2], endian))
                 else:
-                    items.append(self._parse_uint8(payload, item_index))
+                    items.append(payload[item_index])
         
         return items
     
@@ -234,11 +223,11 @@ class SubParser:
                 field_name = item_field["name"]
                 
                 if field_type == "uint8":
-                    value = self._parse_uint8(payload, current_index)
+                    value = payload[current_index]
                     current_index += 1
                 elif field_type == "uint16":
                     endian = item_field.get("endian", "big")
-                    value = self._parse_uint16(payload, current_index, endian)
+                    value = int.from_bytes(payload[current_index:current_index+2], endian)
                     current_index += 2
                 else:
                     value = None

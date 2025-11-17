@@ -12,14 +12,15 @@ from packet.packet_definition import PacketDefinition
 class PacketBuilder:
     """封包構建器"""
     
-    def __init__(self):
+    def __init__(self, packet_def):
         self.logger = logging.getLogger(__name__)
-        self.sub_builder = SubBuilder()
+        self.packet_def = PacketDefinition()
+        self.sub_builder = SubBuilder(packet_def=self.packet_def)
     
     def build(self, cmd_code, fields, seq=1, addr=0):
         """構建封包"""
         try:
-            definition = PacketDefinition().get_definition(cmd_code=cmd_code)
+            definition = self.packet_def.get_definition(cmd_code=cmd_code)
             if not definition:
                 self.logger.error(f"未找到封包定義: {cmd_code}")
                 return None
@@ -73,8 +74,8 @@ class PacketBuilder:
 class SubBuilder:
     """子構建器"""
     
-    def __init__(self):
-        self.definitions = PacketDefinition
+    def __init__(self, packet_def):
+        self.packet_def = packet_def
     
     def build_fields(self, fields, data):
         """構建子字段數據"""
@@ -87,7 +88,7 @@ class SubBuilder:
             
             if field_name in data:
                 value = data[field_name]
-                type_def = PacketDefinition().get_field_type(field_type=field_type)
+                type_def = self.packet_def.get_field_type(field_type=field_type)
                 
                 if type_def:
                     builder = type_def["builder"]
@@ -113,7 +114,7 @@ class SubBuilder:
             if field_type == "list":
                 # 列表類型
                 item_type = field_def.get("item_type", "uint8")
-                type_def = PacketDefinition().get_field_type(field_type=item_type)
+                type_def = self.packet_def.get_field_type(field_type=item_type)
                 
                 if type_def and isinstance(value, list):
                     builder = type_def["builder"]
@@ -134,7 +135,7 @@ class SubBuilder:
                             field_type_in_item = field["type"]
                             
                             if field_name_in_item in item:
-                                type_def = PacketDefinition().get_field_type(field_type=field_type_in_item)
+                                type_def = self.packet_def.get_field_type(field_type=field_type_in_item)
                                 if type_def:
                                     builder = type_def["builder"]
                                     item_value = item[field_name_in_item]
@@ -146,7 +147,7 @@ class SubBuilder:
             
             else:
                 # 單個字段
-                type_def = PacketDefinition().get_field_type(field_type=field_type)
+                type_def = self.packet_def.get_field_type(field_type=field_type)
                 if type_def:
                     builder = type_def["builder"]
                     if field_type == "uint16":

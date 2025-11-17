@@ -155,7 +155,7 @@ class Receive(Base):
         
         # 處理封包(並發送ACK)
         #self.center.process(packet)
-        self.center.process_and_ack(packet, self.network, addr, self.logger)
+        self.center.process_and_ack(packet, addr)
         
     
 class Command(Base):
@@ -221,7 +221,7 @@ class Command(Base):
             self.logger.info(f"處理 {command} 封包: {packet}")
             self._handle_command_response(packet, addr)
 
-        self.center.process_and_ack(packet, self.network, addr, self.logger)
+        self.center.process_and_ack(packet, addr)
 
     def _handle_command_response(self, packet, addr):
         """處理指令回應"""
@@ -316,7 +316,7 @@ class Command(Base):
         
         self.running = False
 
-    def _execute_command(self, command_input: str):
+    def _execute_command(self, command_input):
         """執行指令"""
         try:
             parts = command_input.split()
@@ -394,7 +394,7 @@ class Command(Base):
         except Exception as e:
             print(f"指令執行錯誤: {e}")
 
-    def _send_multi_step_command(self, session: Dict, fields: Dict):
+    def _send_multi_step_command(self, session, fields):
         """
         發送多步驟指令
         

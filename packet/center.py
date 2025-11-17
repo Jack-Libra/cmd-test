@@ -7,7 +7,7 @@ import threading
 from packet.packet_parser import PacketParser
 from packet.packet_builder import PacketBuilder
 from packet.packet_processor import PacketProcessor
-
+from packet.packet_definition import PacketDefinition
 
 from utils import AckFrame
 from config.log_setup import get_logger
@@ -18,10 +18,19 @@ class PacketCenter:
     """封包處理中心"""
     
     def __init__(self, mode="receive", network=None, config=None, tc_id=None, logger=None):
+        
         self.logger = get_logger(f"tc.{mode}")
-        self.parser = PacketParser(mode=mode)
-        self.builder = PacketBuilder()
-        self.processor = PacketProcessor(mode=mode)
+        
+        self.packet_def = PacketDefinition()
+        
+        # 將 packet_def 注入到各個組件
+        self.parser = PacketParser(mode=mode, packet_def=self.packet_def)
+        self.builder = PacketBuilder(packet_def=self.packet_def)
+        self.processor = PacketProcessor(mode=mode, packet_def=self.packet_def)
+        
+        # 保存 network 和 logger 用於 process_and_ack
+        self.network = network
+
         
         self.seq = 0
         self.seq_lock = threading.Lock()
@@ -48,8 +57,14 @@ class PacketCenter:
             self.seq = (self.seq + 1) & 0xFF
             return self.seq
 
-    def process_and_ack(self, packet, network, addr, logger):
-        """處理封包並發送ACK"""
+    def process_and_ack(self, packet, addr):
+        """
+        處理封包並發送ACK
+        
+        Args:
+            packet: 解析後的封包字典
+            addr: 發送地址 (ip, port)
+        """
         if not packet:
             return False
         
@@ -66,17 +81,23 @@ class PacketCenter:
         ack_frame = self.create_ack(packet["序列號"], packet["號誌控制器ID"])
         
         try:
-            network.send_data(ack_frame, addr)
-            ack_hex = binascii.hexlify(ack_frame).decode('ascii').upper()
-            logger.info(f"{'='*60}")
-            logger.info(f"發送ACK: Seq=0x{packet['序列號']:02X}, ")
-            logger.info(f"TC_ID={packet['號誌控制器ID']:03d}, ")
-            logger.info(f"目標={addr[0]}:{addr[1]}, ")
-            logger.info(f"封包={ack_hex}, ")
-            logger.info(f"回應封包={command}")
-            logger.info(f"{'='*60}")
+            if self.network:
+                self.network.send_data(ack_frame, addr)
+                ack_hex = binascii.hexlify(ack_frame).decode('ascii').upper()
+                log_msg = (
+                    f"{'='*60}\n"
+                    f"發送ACK: Seq=0x{packet['序列號']:02X}, "
+                    f"TC_ID={packet['號誌控制器ID']:03d}, "
+                    f"目標={addr[0]}:{addr[1]}, "
+                    f"封包={ack_hex}, "
+                    f"回應封包={command}\n"
+                    f"{'='*60}"
+                )
+                self.logger.info(log_msg)
         except Exception as e:
-            logger.error(f"發送ACK失敗: {e}")
+            self.logger.error(f"發送ACK失敗: {e}")
+        
+        return True
 
 
 
