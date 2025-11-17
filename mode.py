@@ -10,9 +10,10 @@ import time
 import datetime
 from config.config import TCConfig
 from config.network import UDPTransport
-from packet.registry import PacketCenter
+from packet.center import PacketCenter
+from packet.packet_definition import PacketDefinition
+from utils import binary_list_to_int
 from config.log_setup import setup_logging 
-from config.commands import COMMAND_METADATA, COMMAND_HANDLERS, COMMANDS_BY_CATEGORY
 import binascii
 
 
@@ -22,8 +23,7 @@ class Base:
     def __init__(self, device_id=3, mode: str = "receive"):
         self.mode = mode
         self.device_id = device_id
-        
-        
+            
         # 設置日誌文件名
         log_file_map = {
             "receive": "receive.log",
@@ -47,7 +47,13 @@ class Base:
         )
         
         # 初始化封包註冊中心
-        self.registry = PacketCenter(mode=mode)
+        self.center = PacketCenter(
+            mode=mode,
+            network=self.network,
+            config=self.config,
+            tc_id=self.tc_id,
+            logger=self.logger
+        )
         
         # 執行緒控制
         self.running = False
@@ -91,7 +97,7 @@ class Base:
                         
                         
                         # 解析封包
-                        packet = self.registry.parse(frame)
+                        packet = self.center.parse(frame)
                         if packet:
                             # 處理接收到的封包（子類實現）
                             self._handle_received_packet(packet, addr)
@@ -145,18 +151,19 @@ class Receive(Base):
             return
         
         # 處理封包(並發送ACK)
-        #self.registry.process(packet)
-        self.registry.process_and_ack(packet, self.network, addr, self.logger)
+        #self.center.process(packet)
+        self.center.process_and_ack(packet, self.network, addr, self.logger)
         
     
 class Command(Base):
     """指令下傳介面類：接收+命令雙線程，使用 seq 追蹤命令狀態"""
     
-    COMMAND_HANDLERS = COMMAND_HANDLERS  # 從 config.commands 導入
-    
     def __init__(self, device_id=3, mode="command"):
-        super().__init__(device_id, mode)
         
+        super().__init__(device_id, mode)
+
+        self.packet_def = PacketDefinition()
+
         # 指令追蹤
         self.pending_commands = {}  # {seq: command_info}
         self.command_history = []   # 指令歷史記錄
@@ -164,7 +171,7 @@ class Command(Base):
         
         # 命令線程
         self.command_thread = None
-        
+
         self.logger.info(f"指令介面初始化完成 - TC{self.tc_id:03d}")
     
     def start(self):
@@ -196,6 +203,8 @@ class Command(Base):
             self.stop()
         
         return True
+
+
     
     def _handle_received_packet(self, packet, addr):
         """處理接收到的封包（覆寫基類方法）"""
@@ -206,14 +215,11 @@ class Command(Base):
         if command in ["0F80", "0F81"]:
             self.logger.info(f"處理 {command} 封包: {packet}")
             self._handle_command_response(packet, addr)
-            self.registry.process_and_ack(packet, self.network, addr, self.logger)
-        else:
-            # 處理封包並發送ACK
-            self.registry.process_and_ack(packet, self.network, addr, self.logger)
-    
+
+        self.center.process_and_ack(packet, self.network, addr, self.logger)
+
     def _handle_command_response(self, packet, addr):
         """處理指令回應"""
-        command = packet.get("指令編號")
         seq = packet.get("序列號")
         
         with self.pending_lock:
@@ -221,33 +227,25 @@ class Command(Base):
                 return
             
             cmd_info = self.pending_commands[seq]
+            command = packet.get("指令編號")
             
-            # 判斷成功或失敗
-            is_success = command in ["設定/查詢回報（成功）", "0F80", "5F80"]
-            is_failure = command in ["設定/查詢回報（失敗）", "0F81", "5F81"]
-            
-            if is_success:
-                self._update_command_status(cmd_info, 'success')
+            if command == "0F80":
+                cmd_info['status'] = 'success'
+                cmd_info['response_time'] = datetime.datetime.now().isoformat()
                 self.logger.info(f"✓ 指令執行成功: {cmd_info['description']}")
-            elif is_failure:
+            elif command == "0F81":
                 error_code = packet.get("錯誤碼", 0)
-                self._update_command_status(cmd_info, 'failed', error_code)
-                self.logger.error(
-                    f"✗ 指令執行失敗: {cmd_info['description']} "
-                    f"(錯誤碼: 0x{error_code:02X})"
-                )
+                cmd_info['status'] = 'failed'
+                cmd_info['error_code'] = error_code
+                cmd_info['response_time'] = datetime.datetime.now().isoformat()
+                self.logger.error(f"✗ 指令執行失敗: {cmd_info['description']} (錯誤碼: 0x{error_code:02X})")
             
-            # 移到歷史記錄
             self.command_history.append(cmd_info)
             del self.pending_commands[seq]
-    
-    def _update_command_status(self, cmd_info, status, error_code=0):
-        """更新指令狀態"""
-        cmd_info['status'] = status
-        cmd_info['response_time'] = datetime.datetime.now().isoformat()
-        if status == 'failed':
-            cmd_info['error_code'] = error_code
-    
+
+
+# =============命令迴圈=============    
+
     def _command_loop(self):
         """指令輸入迴圈"""
         self._show_help()
@@ -268,63 +266,169 @@ class Command(Base):
                     self._show_history()
                 else:
                     self._execute_command(command_input)
-                    
+                        
             except KeyboardInterrupt:
                 break
             except Exception as e:
                 self.logger.info(f"指令處理錯誤: {e}")
         
         self.running = False
-    
-    # ========== 工具方法 ==========
-    
-    def _parse_hex_or_int(self, value_str, param_name="值"):
-        """
-        解析十六進制或十進制字符串
-        
-        Args:
-            value_str: 輸入字符串
-            param_name: 參數名稱（用於錯誤提示）
-        
-        Returns:
-            (value, error_message) - 成功返回 (值, None)，失敗返回 (None, 錯誤信息)
-        """
+
+    def _execute_command(self, command_input: str):
+        """執行指令"""
         try:
+            parts = command_input.split()
+            if not parts:
+                return
+            
+            cmd_type = parts[0].upper()
+            definition = self.packet_def.get_definition(cmd_type)
+            
+            if not definition:
+                print(f"不支援的指令類型: {cmd_type}")
+                return
+            
+            if definition.get("reply_type") not in ["查詢", "設定"]:
+                print(f"{cmd_type} 不是可執行命令")
+                return
+            
+            if definition.get("interaction_type") == "multi_step":
+                print(f"{cmd_type} 指令需要多步驟輸入，目前尚未實現")
+                return
+            
+            fields = definition.get("fields", [])
+
+            # 檢查列表參數
+            if any(f.get("type") == "list" for f in fields):
+                print(f"{cmd_type} 指令包含列表參數，目前不支援")
+                return
+            
+            # 檢查參數數量
+            if len(parts[1:]) < len(fields):
+                format_str = definition.get("format", cmd_type)
+                example_str = definition.get("example", cmd_type)
+                print(f"{cmd_type} 指令參數不足\n格式: {format_str}\n範例: {example_str}")
+                return
+            
+            # 解析參數
+            fields_dict = {}
+            description_parts = [definition.get("description", cmd_type)]
+            
+            for i, field in enumerate(fields):
+                field_name = field.get("name", f"參數{i}")
+                input_type = field.get("input_type", "dec")  # fields 中已有 input_type
+                
+                try:
+                    value = self._parse_param(parts[1:][i], field_name, input_type)
+                except ValueError as e:
+                    print(str(e))
+                    return
+                
+                # 檢查範圍
+                param_range = (0, 0xFF) 
+                if not (param_range[0] <= value <= param_range[1]):
+                    print(f"{field_name} 超出範圍 (0x{param_range[0]:02X}~0x{param_range[1]:02X}): {value}")
+                    return
+                
+                fields_dict[field_name] = value
+                description_parts.append(f"{field_name}:0x{value:02X}")
+            
+            # 發送命令並註冊
+            description = " ".join(description_parts)
+            seq = self._send_command(cmd_type, fields_dict, description)
+            if seq:
+                self._register_command(cmd_type, seq, definition)
+        
+        except Exception as e:
+            print(f"指令執行錯誤: {e}")
+
+    def _parse_param(self, value_str, param_name, input_type="dec"):
+        """解析參數"""
+        
+        # 二進制
+        if input_type == "binary":
+            value_str = value_str.strip()
+            if not all(c in '01' for c in value_str) or len(value_str) != 8:
+                raise ValueError(f"{param_name} 二進制格式錯誤: 需要8位二進制字符串，如 10101010")
+            bits = [int(bit) for bit in value_str]
+            return binary_list_to_int(bits)
+        
+        # 十六進制
+        elif input_type == "hex":
             if value_str.startswith('0x') or value_str.startswith('0X'):
-                return int(value_str, 16), None
-            elif all(c in '0123456789ABCDEFabcdef' for c in value_str):
-                return int(value_str, 16), None
+                value_str = value_str[2:]
+            if not all(c in '0123456789ABCDEFabcdef' for c in value_str):
+                raise ValueError(f"{param_name} 格式錯誤: {value_str} (應為十六進制)")
+            return int(value_str, 16)
+        
+        # 十進制
+        else:
+            if not value_str.isdigit():
+                raise ValueError(f"{param_name} 格式錯誤: {value_str} (應為十進制數字)")
+            return int(value_str, 10)
+       
+    def _send_command(self, cmd_code, fields, description):
+        """發送指令封包"""
+        try:
+            seq = self.center.next_seq()
+            frame = self.center.build(cmd_code, fields, seq=seq, addr=self.tc_id)
+            
+            if not frame:
+                print(f"構建封包失敗: {cmd_code}")
+                return None
+            
+            addr = (self.config.get_tc_ip(), self.config.get_tc_port())
+            if self.network.send_data(frame, addr):
+                self.logger.info(f"發送指令: {description} (SEQ: {seq})")
+                self.logger.info(f"封包內容: {binascii.hexlify(frame).decode('ascii')}")
+                return seq
             else:
-                return int(value_str), None
-        except ValueError:
-            return None, f"{param_name} 格式錯誤: {value_str}"
-    
-    def _validate_range(self, value, min_val, max_val, param_name="值"):
-        """驗證值是否在範圍內"""
-        if not (min_val <= value <= max_val):
-            return False, f"{param_name} 超出範圍 (0x{min_val:02X}~0x{max_val:02X} 或 {min_val}~{max_val}): {value}"
-        return True, None
-    
+                print("封包發送失敗")
+                return None
+                
+        except Exception as e:
+            self.logger.error(f"發送指令封包失敗: {e}", exc_info=True)
+            print(f"發送失敗: {e}")
+            return None
+
+    def _register_command(self, cmd_code, seq, definition):
+        """註冊命令到待處理列表"""
+        cmd_info = {
+            '序列號': seq,
+            '號誌控制器ID': self.tc_id,
+            '指令': cmd_code,
+            'description': definition.get('description', cmd_code),
+            'send_time': datetime.datetime.now().isoformat(),
+            'status': 'pending'
+        }
+        with self.pending_lock:
+            self.pending_commands[seq] = cmd_info
+        print(f"指令已發送 (SEQ: {seq})")
+
+# =============顯示說明=============    
+
     def _show_help(self):
-        """顯示說明（自動從元數據生成）"""
+        """顯示說明"""
         print(f"交通控制系統指令下傳介面 - TC{self.tc_id:03d}")
-        print(f"可用指令:")
-        print(f"  help     - 顯示此說明")
-        print(f"  status   - 顯示系統狀態")
-        print(f"  history  - 顯示指令歷史")
-        print(f"  quit     - 退出程式")
+        print(f"可用指令: help, status, history, quit")
         
-        # 按類別顯示命令
-        for category, commands in COMMANDS_BY_CATEGORY.items():
-            if commands:
-                print(f"\n{category}指令:")
-                for cmd_code in sorted(commands):
-                    meta = COMMAND_METADATA[cmd_code]
-                    print(f"  {meta['format']:<45} - {meta['description']}")
+        # 動態獲取可執行命令
+        executable_commands = {}
+        for cmd_code, definition in self.packet_def.definitions.items():
+            if definition.get("reply_type") in ["查詢", "設定"]:
+                executable_commands[cmd_code] = definition
         
-        print(f"\n範例:")
-        for cmd_code, meta in sorted(COMMAND_METADATA.items()):
-            print(f"  {meta['example']}")
+        if executable_commands:
+            print(f"\n封包指令:")
+            for cmd_code, definition in sorted(executable_commands.items()):
+                format_str = definition.get("format", cmd_code)
+                desc = definition.get("description", cmd_code)
+                print(f"  {format_str:<45} - {desc}")
+            
+            print(f"\n範例:")
+            for cmd_code, definition in sorted(executable_commands.items()):
+                example = definition.get("example", cmd_code)
+                print(f"  {example}")
         
     def _show_status(self):
         """顯示系統狀態"""
@@ -333,8 +437,6 @@ class Command(Base):
         
         print(f"\n系統狀態:")
         print(f"  控制器ID: TC{self.tc_id:03d}")
-        print(f"  控制器地址: {self.config.get_tc_ip()}:{self.config.get_tc_port()}")
-        print(f"  本地地址: {self.config.get_transserver_ip()}:{self.config.get_transserver_port()}")
         print(f"  待處理指令: {pending_count}")
         print(f"  指令歷史: {len(self.command_history)}")
         
@@ -342,8 +444,7 @@ class Command(Base):
             print("\n待處理指令:")
             with self.pending_lock:
                 for seq, cmd_info in self.pending_commands.items():
-                    print(f"  SEQ {seq}: {cmd_info['description']} "
-                          f"(發送時間: {cmd_info['send_time']})")
+                    print(f"  SEQ {seq}: {cmd_info['description']} ({cmd_info['send_time']})")
     
     def _show_history(self):
         """顯示指令歷史"""
@@ -353,281 +454,15 @@ class Command(Base):
         
         print(f"\n指令歷史 (最近 {min(10, len(self.command_history))} 筆):")
         for cmd_info in self.command_history[-10:]:
-            status_icon = "✓" if cmd_info['status'] == 'success' else "✗"
-            print(f"  {status_icon} {cmd_info['description']}")
+            icon = "✓" if cmd_info['status'] == 'success' else "✗"
+            print(f"  {icon} {cmd_info['description']}")
             print(f"    發送: {cmd_info['send_time']}")
             print(f"    回應: {cmd_info.get('response_time', '未回應')}")
             if cmd_info['status'] == 'failed':
                 print(f"    錯誤: 0x{cmd_info.get('error_code', 0):02X}")
-    
-    def _execute_command(self, command_input: str):
-        """執行指令"""
-        try:
-            parts = command_input.split()
-            if not parts:
-                return
-            
-            cmd_type = parts[0].upper()
-            handler_name = self.COMMAND_HANDLERS.get(cmd_type)
-            
-            if handler_name:
-                handler = getattr(self, handler_name)
-                handler(parts[1:])
-            else:
-                print(f"不支援的指令類型: {cmd_type}")
-                print(f"可用指令: {', '.join(sorted(COMMAND_METADATA.keys()))}")
-                print(f"輸入 'help' 查看詳細說明")
-        
-        except Exception as e:
-            print(f"指令執行錯誤: {e}")   
 
-    def _execute_5f40_command(self, args):
-        """執行 5F40 指令（查詢控制策略）"""
-        meta = COMMAND_METADATA["5F40"]
-        try:
-            self._send_command("5F40", {}, meta["description"], addr=self.tc_id)
-        except Exception as e:
-            print(f"5F40 指令錯誤: {e}")
-    
-    def _execute_5f10_command(self, args):
-        """執行 5F10 指令（設定控制策略）"""
-        meta = COMMAND_METADATA["5F10"]
-        
-        if len(args) < len(meta["params"]):
-            print(f"5F10 指令參數不足")
-            print(f"格式: {meta['format']}")
-            print(f"範例: {meta['example']}")
-            return
-        
-        try:
-            control_strategy = int(args[0])
-            effect_time = int(args[1])
-            
-            # 使用元數據定義驗證範圍
-            param_defs = meta["params"]
-            valid, error = self._validate_range(control_strategy, param_defs[0]["range"][0], param_defs[0]["range"][1], "控制策略")
-            if not valid:
-                print(error)
-                return
-            
-            valid, error = self._validate_range(effect_time, param_defs[1]["range"][0], param_defs[1]["range"][1], "有效時間")
-            if not valid:
-                print(error)
-                return
-            
-            fields = {
-                "control_strategy": control_strategy,
-                "effect_time": effect_time
-            }
-            
-            self._send_command(
-                "5F10",
-                fields,
-                f"{meta['description']} (策略:0x{control_strategy:02X}, 時間:{effect_time}分鐘)",
-                addr=self.tc_id
-            )
-        except ValueError as e:
-            print(f"5F10 指令參數錯誤: {e}")
-        except Exception as e:
-            print(f"5F10 指令錯誤: {e}")
-    
-    def _execute_5f48_command(self, args):
-        """執行 5F48 指令（查詢時制計畫）"""
-        meta = COMMAND_METADATA["5F48"]
-        try:
-            self._send_command("5F48", {}, meta["description"], addr=self.tc_id)
-        except Exception as e:
-            print(f"5F48 指令錯誤: {e}")
-    
-    def _execute_5f18_command(self, args):
-        """執行 5F18 指令（選擇時制計畫）"""
-        meta = COMMAND_METADATA["5F18"]
-        
-        if len(args) < len(meta["params"]):
-            print(f"5F18 指令參數不足")
-            print(f"格式: {meta['format']}")
-            print(f"範例: {meta['example']}")
-            return
-        
-        try:
-            plan_id = int(args[0])
-            
-            # 使用元數據定義驗證範圍
-            param_def = meta["params"][0]
-            valid, error = self._validate_range(plan_id, param_def["range"][0], param_def["range"][1], "時制計畫編號")
-            if not valid:
-                print(error)
-                return
-            
-            fields = {"plan_id": plan_id}
-            self._send_command("5F18", fields, f"{meta['description']} (計畫ID:{plan_id})", addr=self.tc_id)
-        except ValueError as e:
-            print(f"5F18 指令參數錯誤: {e}")
-        except Exception as e:
-            print(f"5F18 指令錯誤: {e}")
 
-    def _execute_5f43_command(self, args):
-        """執行 5F43 指令（查詢時相排列）"""
-        meta = COMMAND_METADATA["5F43"]
-        
-        if len(args) < len(meta["params"]):
-            print(f"5F43 指令參數不足")
-            print(f"格式: {meta['format']}")
-            print(f"範例: {meta['example']}")
-            return
-        
-        try:
-            # 解析參數
-            phase_order, error = self._parse_hex_or_int(args[0], "時相編號")
-            if error:
-                print(error)
-                return
-            
-            # 驗證範圍
-            param_def = meta["params"][0]
-            valid, error = self._validate_range(phase_order, param_def["range"][0], param_def["range"][1], "時相編號")
-            if not valid:
-                print(error)
-                return
-            
-            fields = {"phase_order": phase_order}
-            
-            self._send_command(
-                "5F43",
-                fields,
-                f"{meta['description']} (時相編號:0x{phase_order:02X})",
-                addr=self.tc_id
-            )
-        except Exception as e:
-            print(f"5F43 指令錯誤: {e}")
-    
-    def _execute_5f13_command(self, args):
-        """執行 5F13 指令（設定時相排列）"""
-        meta = COMMAND_METADATA["5F13"]
-        
-        # 驗證基本參數數量（前4個固定參數）
-        if len(args) < 4:
-            print(f"5F13 指令參數不足")
-            print(f"格式: {meta['format']}")
-            print(f"範例: {meta['example']}")
-            return
-        
-        try:
-            # 解析前4個基本參數
-            phase_order, error = self._parse_hex_or_int(args[0], "時相編號")
-            if error:
-                print(error)
-                return
-            
-            signal_map, error = self._parse_hex_or_int(args[1], "號誌位置圖")
-            if error:
-                print(error)
-                return
-            
-            signal_count = int(args[2])
-            sub_phase_count = int(args[3])
-            
-            # 驗證參數範圍（使用元數據定義）
-            param_defs = meta["params"]
-            valid, error = self._validate_range(phase_order, param_defs[0]["range"][0], param_defs[0]["range"][1], "時相編號")
-            if not valid:
-                print(error)
-                return
-            
-            valid, error = self._validate_range(signal_map, param_defs[1]["range"][0], param_defs[1]["range"][1], "號誌位置圖")
-            if not valid:
-                print(error)
-                return
-            
-            valid, error = self._validate_range(signal_count, param_defs[2]["range"][0], param_defs[2]["range"][1], "信號燈數量")
-            if not valid:
-                print(error)
-                return
-            
-            valid, error = self._validate_range(sub_phase_count, param_defs[3]["range"][0], param_defs[3]["range"][1], "綠燈分相數目")
-            if not valid:
-                print(error)
-                return
-            
-            # 解析信號狀態列表
-            expected_status_count = signal_count * sub_phase_count
-            if len(args) < 4 + expected_status_count:
-                print(f"信號狀態列表參數不足")
-                print(f"需要 {expected_status_count} 個狀態值 (signalCount * subPhaseCount)")
-                print(f"實際提供: {len(args) - 4} 個")
-                return
-            
-            signal_status_list = []
-            for i in range(4, 4 + expected_status_count):
-                status, error = self._parse_hex_or_int(args[i], f"信號狀態[{i-4}]")
-                if error:
-                    print(error)
-                    return
-                
-                valid, error = self._validate_range(status, 0, 0xFF, f"信號狀態[{i-4}]")
-                if not valid:
-                    print(error)
-                    return
-                
-                signal_status_list.append(status)
-            
-            fields = {
-                "phase_order": phase_order,
-                "號誌位置圖": signal_map,
-                "signal_count": signal_count,
-                "sub_phase_count": sub_phase_count,
-                "信號狀態列表": signal_status_list
-            }
-            
-            self._send_command(
-                "5F13",
-                fields,
-                f"{meta['description']} (時相:0x{phase_order:02X}, 方向:{signal_count}, 分相:{sub_phase_count})",
-                addr=self.tc_id
-            )
-        except ValueError as e:
-            print(f"5F13 指令參數錯誤: {e}")
-            print("請檢查參數格式是否正確")
-        except Exception as e:
-            print(f"5F13 指令錯誤: {e}")
-                
-    def _send_command(self, cmd_code, fields, description, addr):
-        """發送指令封包"""
-        try:
-            # 獲取序列號
-            seq = self.registry.next_seq()
-            
-            # 構建封包
-            frame = self.registry.build(cmd_code, fields, seq=seq, addr=self.tc_id)
-            
-            if not frame:
-                print(f"構建封包失敗: {cmd_code}")
-                return
-            
-            # 記錄指令（用於追蹤）
-            cmd_info = {
-                '序列號': seq,
-                '號誌控制器ID': self.tc_id,
-                '指令': cmd_code,
-                'description': description,
-                'send_time': datetime.datetime.now().isoformat(),
-                'status': 'pending'
-            }
-            
-            with self.pending_lock:
-                self.pending_commands[seq] = cmd_info
-            
-            # 發送封包
-            if self.network.send_data(frame, addr=(self.config.get_tc_ip(), self.config.get_tc_port())):
-                self.logger.info(f"發送指令: {description} (SEQ: {seq})")
-                
-                self.logger.info(f"封包內容: {binascii.hexlify(frame).decode('ascii')}")
-            else:
-                self.logger.error("封包發送失敗")
-                with self.pending_lock:
-                    if seq in self.pending_commands:
-                        del self.pending_commands[seq]
-                
-        except Exception as e:
-            self.logger.error(f"發送指令封包失敗: {e}", exc_info=True)
-            self.logger.error(f"發送失敗: {e}")
+
+
+
+

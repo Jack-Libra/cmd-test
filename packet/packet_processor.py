@@ -23,8 +23,6 @@ class PacketProcessor:
             "5F03": self._handle_5f03, #主動回報
             "5F0C": self._handle_5f0c, #主動回報
             "5F08": self._handle_5f08, #主動回報
-            "5F13": self._handle_5f13, #設定
-            "5F43": self._handle_5f43, #查詢
             "5FC0": self._handle_5fc0, #查詢回報
             "5FC3": self._handle_5fc3, #查詢回報
             "5FC8": self._handle_5fc8, #查詢回報
@@ -137,45 +135,6 @@ class PacketProcessor:
             log_message = "\n".join(lines)
         
         return log_message
-
-    def _handle_5f13(self, packet):
-        """處理5F13封包（設定時相排列）"""
-        phase_order = packet.get("phase_order", 0)
-        signal_map = packet.get("號誌位置圖", "")
-        signal_count = packet.get("signal_count", 0)
-        sub_phase_count = packet.get("sub_phase_count", 0)
-        signal_status_list = packet.get("信號狀態列表", [])
-        
-        # 構建字段字典
-        fields = {
-            "時相編號": f"{phase_order:02X}",
-            "號誌位置圖": signal_map,
-            "信號燈數量": signal_count,
-            "綠燈分相數目": sub_phase_count,
-        }
-        
-        log_message = format_packet_display(packet, "5F13", fields)
-        
-        # 添加信號狀態列表（如果已經是格式化字符串列表）
-        if isinstance(signal_status_list, list) and signal_status_list:
-            lines = log_message.split("\n")
-            # 在 "原始資料" 之前插入
-            insert_pos = len(lines) - 1
-            for status_line in reversed(signal_status_list):
-                lines.insert(insert_pos, str(status_line))
-            log_message = "\n".join(lines)
-        
-        return log_message
-
-    def _handle_5f43(self, packet):
-        """處理5F43封包（查詢時相排列）"""
-        phase_order = packet.get("phase_order", 0)
-        
-        fields = {
-            "時相編號": f"{phase_order:02X}"
-        }
-        
-        return format_packet_display(packet, "5F43", fields)
 
     def _handle_5fc3(self, packet):
         """處理5FC3封包（時相排列回報）"""

@@ -7,14 +7,17 @@ import threading
 from packet.packet_parser import PacketParser
 from packet.packet_builder import PacketBuilder
 from packet.packet_processor import PacketProcessor
+
+
 from utils import AckFrame
 from config.log_setup import get_logger
 import binascii
 
+
 class PacketCenter:
     """封包處理中心"""
     
-    def __init__(self, mode="receive"):
+    def __init__(self, mode="receive", network=None, config=None, tc_id=None, logger=None):
         self.logger = get_logger(f"tc.{mode}")
         self.parser = PacketParser(mode=mode)
         self.builder = PacketBuilder()
@@ -22,10 +25,9 @@ class PacketCenter:
         
         self.seq = 0
         self.seq_lock = threading.Lock()
-    
+
     def parse(self, packet):
-        """解析封包"""
-        
+        """解析封包"""     
         return self.parser.parse(packet)
     
     def build(self, cmd_code, fields, seq=1, addr=0):

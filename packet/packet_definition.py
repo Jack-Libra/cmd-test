@@ -45,7 +45,7 @@ class PacketDefinition:
     def get_definition(self, cmd_code: str) -> Optional[Dict]:
         """獲取封包定義"""
         return self.definitions.get(cmd_code)
-    
+      
     
     def get_field_type(self, field_type: str) -> Optional[Dict]:
         """獲取字段類型定義"""

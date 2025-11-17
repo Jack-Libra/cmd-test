@@ -92,6 +92,7 @@ F5_GROUP_DEFINITIONS = {
                 "index": 3,
                 "type": "uint8",
                 "description": "號誌位置圖",
+                "input_type": "binary",
                 "post_process": lambda value, result: f"0x{value:02X} = {int_to_binary_list(value)}"
                 # 結果：signal_map = [1, 0, 1, 0, 1, 0, 1, 0] 而不是 85
             },
@@ -129,29 +130,50 @@ F5_GROUP_DEFINITIONS = {
         "group": "5F",
         "command": 0x13,
         "log_modes": ["command"],
-        
+        #"interaction_type": "multi_step",
+        #"steps": 3,
+
         "fields": [
-            {"name": "phase_order", "index": 2, "type": "uint8", "description": "時相編號"},
+            {
+                "name": "phase_order",
+                "index": 2,
+                "type": "uint8",
+                "description": "時相編號",
+                "input_type": "hex"  
+            },
             {
                 "name": "號誌位置圖",
                 "index": 3,
                 "type": "uint8",
                 "description": "號誌位置圖",
-                "post_process": lambda value, result: f"0x{value:02X} = {int_to_binary_list(value)}"
+                "input_type": "binary" # 低位在前二進制字符串
             },
-            {"name": "signal_count", "index": 4, "type": "uint8", "description": "信號燈數量"},
-            {"name": "sub_phase_count", "index": 5, "type": "uint8", "description": "綠燈分相數目"},
+            {
+                "name": "signal_count",
+                "index": 4,
+                "type": "uint8",
+                "description": "信號燈數量"
+            },
+            {
+                "name": "sub_phase_count",
+                "index": 5,
+                "type": "uint8",
+                "description": "綠燈分相數目"
+            },
             {
                 "name": "信號狀態列表",
                 "index": 6,
                 "type": "list",
                 "item_type": "uint8",
                 "count_from": lambda result: result.get("signal_count", 0) * result.get("sub_phase_count", 0),
-                "description": "信號狀態列表（每個分相包含 SignalCount 個狀態，共 SubPhaseCount 個分相）",
-                "post_process": format_5f03_signal_status
+                "description": "信號狀態列表（每個分相包含 SignalCount 個狀態，共 SubPhaseCount 個分相）"
             }
         ],
         
+        "format": "5F13 <phase_order> <號誌位置圖> <signal_count> <sub_phase_count> <信號狀態列表...>",
+        "example": "5F13 40 10101010 8 3 85 85 85 85 85 85 85 85 85 85 85 85 85 85 85 85 85 85 85 85",
+
+
         "validation": {
             "type": "min_length",
             "value": 6,
@@ -169,9 +191,18 @@ F5_GROUP_DEFINITIONS = {
         "log_modes": ["command"],
         
         "fields": [
-            {"name": "phase_order", "index": 2, "type": "uint8", "description": "時相編號"}
+            {
+                "name": "phase_order",
+                "index": 2,
+                "type": "uint8",
+                "description": "時相編號",
+                "input_type": "hex"  
+            }
         ],
         
+        "format": "5F43 <phase_order>",
+        "example": "5F43 64",
+                
         "validation": {
             "type": "exact_length",
             "value": 3,
@@ -225,10 +256,12 @@ F5_GROUP_DEFINITIONS = {
         "needs_ack": True,
         "group": "5F",
         "command": 0x40,
-        "log_modes": ["command"],  # 查詢命令通常在 command 模式記錄
-        # 無訊息參數（只有命令碼 5F 40）
+        "log_modes": ["command"], 
+
         "fields": [],
-        
+        "format": "5F40",
+        "example": "5F40",        
+
         "validation": {
             "type": "exact_length",
             "value": 2,
@@ -250,10 +283,7 @@ F5_GROUP_DEFINITIONS = {
                 "index": 2,
                 "type": "uint8",
                 "description": "控制策略",
-                "post_process": lambda value, result: {
-                    "raw": value,
-                    **process_control_strategy(value)
-                }
+                "input_type": "hex"
             },
             {
                 "name": "effect_time",
@@ -262,6 +292,10 @@ F5_GROUP_DEFINITIONS = {
                 "description": "動態控制策略有效時間（分鐘，0~255，0為不計時）"
             }
         ],
+
+        "format": "5F10 <control_strategy> <effect_time>",
+        "example": "5F10 03 60", # 3 = 16進位 0x03
+
         "validation": {
             "type": "exact_length",
             "value": 4,
@@ -337,7 +371,7 @@ F5_GROUP_DEFINITIONS = {
             "error_message": "5F00資料長度錯誤，應為 5F 00 + ControlStrategy + BeginEnd"
         }
     },
-    
+
 # =============現場操作回報=============    
     "5F08": {
         "name": "現場操作回報",
@@ -375,9 +409,10 @@ F5_GROUP_DEFINITIONS = {
         "group": "5F",
         "command": 0x48,
         "log_modes": ["command"],
-        # 無訊息參數（只有命令碼 5F 48）
         "fields": [],
-        
+        "format": "5F48",
+        "example": "5F48",
+
         "validation": {
             "type": "exact_length",
             "value": 2,
