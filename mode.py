@@ -12,10 +12,13 @@ from config.config import TCConfig
 from config.network import UDPTransport
 from packet.center import PacketCenter
 from packet.packet_definition import PacketDefinition
-from utils import binary_list_to_int
+from utils import validate_param_range
+
 from config.log_setup import setup_logging 
 import binascii
 
+from command.session_manager import SessionManager
+from command.step_processor import StepProcessor
 
 class Base:
     """基類：提供共同的初始化和接收功能"""
@@ -164,6 +167,8 @@ class Command(Base):
 
         self.packet_def = PacketDefinition()
 
+        self.session_manager = SessionManager(timeout=300)
+        self.step_processor = StepProcessor(self.packet_def)
         # 指令追蹤
         self.pending_commands = {}  # {seq: command_info}
         self.command_history = []   # 指令歷史記錄
@@ -252,10 +257,42 @@ class Command(Base):
         
         while self.running:
             try:
-                command_input = input("\n請輸入指令 (輸入 'help' 查看說明): ").strip()
+                # 檢查活動會話
+                active_session = self.session_manager.get_active_session()
+                
+                if active_session:
+                    prompt = self.step_processor.get_step_prompt(active_session)
+                else:
+                    prompt = "\n請輸入指令 (輸入 'help' 查看說明): "
+                
+                command_input = input(prompt).strip()
                 if not command_input:
                     continue
                 
+                # 處理會話命令
+                if command_input.lower() == 'cancel' and active_session:
+                    self.session_manager.remove_session(active_session["cmd_code"])
+                    print("已取消當前指令輸入")
+                    continue
+                
+                # 如果有活動會話，處理步驟輸入
+                if active_session:
+                    success, message, is_complete = self.step_processor.process_step(
+                        active_session, command_input
+                    )
+                    print(message)
+                    
+                    if is_complete and success:
+                        # 發送指令
+                        fields = self.step_processor.get_session_fields(active_session)
+                        self._send_multi_step_command(active_session, fields)
+                        self.session_manager.remove_session(active_session["cmd_code"])
+                    elif not success:
+                        # 顯示錯誤，繼續當前步驟
+                        continue
+                    continue
+                
+                # 處理普通命令
                 if command_input.lower() == 'quit':
                     break
                 elif command_input.lower() == 'help':
@@ -268,6 +305,11 @@ class Command(Base):
                     self._execute_command(command_input)
                         
             except KeyboardInterrupt:
+                # 取消活動會話
+                active_session = self.session_manager.get_active_session()
+                if active_session:
+                    self.session_manager.remove_session(active_session["cmd_code"])
+                    print("\n已取消當前指令輸入")
                 break
             except Exception as e:
                 self.logger.info(f"指令處理錯誤: {e}")
@@ -292,15 +334,25 @@ class Command(Base):
                 print(f"{cmd_type} 不是可執行命令")
                 return
             
+            # 檢查是否為多步驟指令（修改）
             if definition.get("interaction_type") == "multi_step":
-                print(f"{cmd_type} 指令需要多步驟輸入，目前尚未實現")
+                # 檢查是否已有活動會話
+                if self.session_manager.get_active_session():
+                    print("已有進行中的指令輸入，請先完成或取消 (輸入 'cancel')")
+                    return
+                
+                # 創建會話並開始多步驟輸入
+                session = self.session_manager.create_session(cmd_type, definition)
+                prompt = self.step_processor.get_step_prompt(session)
+                print(prompt)
                 return
             
+            # 原有的單步處理邏輯
             fields = definition.get("fields", [])
 
             # 檢查列表參數
             if any(f.get("type") == "list" for f in fields):
-                print(f"{cmd_type} 指令包含列表參數，目前不支援")
+                print(f"{cmd_type} 指令包含列表參數，目前不支援單步輸入，請使用多步驟模式")
                 return
             
             # 檢查參數數量
@@ -316,22 +368,22 @@ class Command(Base):
             
             for i, field in enumerate(fields):
                 field_name = field.get("name", f"參數{i}")
-                input_type = field.get("input_type", "dec")  # fields 中已有 input_type
                 
                 try:
-                    value = self._parse_param(parts[1:][i], field_name, input_type)
+                    # 使用 PacketDefinition 的 parse_input 方法
+                    value = self.packet_def.parse_input(parts[1:][i], field, field_name)
+                    
+                    # 使用 utils 的 validate_param_range 方法
+                    min_val = field.get("min", 0)
+                    max_val = field.get("max", 0xFF)
+                    validate_param_range(value, field_name, min_val, max_val)
+                    
+                    fields_dict[field_name] = value
+                    description_parts.append(f"{field_name}:0x{value:02X}")
+                    
                 except ValueError as e:
                     print(str(e))
                     return
-                
-                # 檢查範圍
-                param_range = (0, 0xFF) 
-                if not (param_range[0] <= value <= param_range[1]):
-                    print(f"{field_name} 超出範圍 (0x{param_range[0]:02X}~0x{param_range[1]:02X}): {value}")
-                    return
-                
-                fields_dict[field_name] = value
-                description_parts.append(f"{field_name}:0x{value:02X}")
             
             # 發送命令並註冊
             description = " ".join(description_parts)
@@ -342,31 +394,32 @@ class Command(Base):
         except Exception as e:
             print(f"指令執行錯誤: {e}")
 
-    def _parse_param(self, value_str, param_name, input_type="dec"):
-        """解析參數"""
+    def _send_multi_step_command(self, session: Dict, fields: Dict):
+        """
+        發送多步驟指令
         
-        # 二進制
-        if input_type == "binary":
-            value_str = value_str.strip()
-            if not all(c in '01' for c in value_str) or len(value_str) != 8:
-                raise ValueError(f"{param_name} 二進制格式錯誤: 需要8位二進制字符串，如 10101010")
-            bits = [int(bit) for bit in value_str]
-            return binary_list_to_int(bits)
+        Args:
+            session: 會話字典
+            fields: 字段字典
+        """
+        cmd_code = session["cmd_code"]
+        definition = session["definition"]
         
-        # 十六進制
-        elif input_type == "hex":
-            if value_str.startswith('0x') or value_str.startswith('0X'):
-                value_str = value_str[2:]
-            if not all(c in '0123456789ABCDEFabcdef' for c in value_str):
-                raise ValueError(f"{param_name} 格式錯誤: {value_str} (應為十六進制)")
-            return int(value_str, 16)
+        # 構建描述
+        description_parts = [definition.get("description", cmd_code)]
+        for field_name, value in fields.items():
+            if isinstance(value, list):
+                description_parts.append(f"{field_name}:[{len(value)}個值]")
+            else:
+                description_parts.append(f"{field_name}:0x{value:02X}")
         
-        # 十進制
-        else:
-            if not value_str.isdigit():
-                raise ValueError(f"{param_name} 格式錯誤: {value_str} (應為十進制數字)")
-            return int(value_str, 10)
-       
+        description = " ".join(description_parts)
+        
+        # 發送命令
+        seq = self._send_command(cmd_code, fields, description)
+        if seq:
+            self._register_command(cmd_code, seq, definition)
+     
     def _send_command(self, cmd_code, fields, description):
         """發送指令封包"""
         try:

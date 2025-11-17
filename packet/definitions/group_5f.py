@@ -130,8 +130,37 @@ F5_GROUP_DEFINITIONS = {
         "group": "5F",
         "command": 0x13,
         "log_modes": ["command"],
-        #"interaction_type": "multi_step",
-        #"steps": 3,
+        "interaction_type": "multi_step",
+        
+        "steps": [
+            {
+                "step": 1,
+                "name": "基本參數",
+                "description": "請輸入基本參數",
+                "fields": ["phase_order", "號誌位置圖", "signal_count", "sub_phase_count"],
+                "prompt": "步驟 1/3: 請輸入基本參數\n  <時相編號(hex)> <號誌位置圖(binary)> <信號燈數量> <綠燈分相數目>\n  範例: 40 10101010 8 3\n> "
+            },
+            {
+                "step": 2,
+                "name": "信號狀態列表",
+                "description": "請輸入信號狀態列表",
+                "fields": [],
+                "dynamic_count": {
+                    "field": "signal_count",
+                    "multiplier": "sub_phase_count"
+                },
+                "list_field_name": "信號狀態列表",
+                "prompt": "步驟 2/3: 請輸入信號狀態列表 (共 {total} 個值，用空格分隔)\n  需要 {signal_count} × {sub_phase_count} = {total} 個狀態值\n  範例: 85 85 85 85 85 85 85 85 85 85 85 85 85 85 85 85 85 85 85 85 85 85 85 85\n> "
+            },
+            {
+                "step": 3,
+                "name": "確認",
+                "description": "確認並發送指令",
+                "type": "confirmation",
+                "preview": True,
+                "prompt": "步驟 3/3: 確認發送？(y/n)\n{preview}\n> "
+            }
+        ],
 
         "fields": [
             {

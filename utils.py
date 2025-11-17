@@ -222,3 +222,25 @@ def format_packet_display(packet: dict, command: str,
     lines.append("="*60)
     
     return "\n".join(lines)    
+
+def validate_param_range(value: int, field_name: str, 
+                        min_val: int = 0, max_val: int = 0xFF) -> bool:
+    """
+    驗證參數範圍（通用工具函數）
+    
+    Args:
+        value: 要驗證的值
+        field_name: 字段名稱（用於錯誤提示）
+        min_val: 最小值，默認 0
+        max_val: 最大值，默認 0xFF
+        
+    Returns:
+        是否在範圍內
+        
+    Raises:
+        ValueError: 超出範圍
+    """
+    if not (min_val <= value <= max_val):
+        raise ValueError(f"{field_name} 超出範圍 (0x{min_val:02X}~0x{max_val:02X}): {value}")
+    return True
+    
