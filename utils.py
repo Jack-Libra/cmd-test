@@ -1,4 +1,3 @@
-# core/utils.py
 """
 工具函數
 """
@@ -142,18 +141,18 @@ def int_to_binary_list(n: int) -> list:
     
 def binary_list_to_int(bits: list) -> int:
     """
-    將二進制列表轉換為整數（低位在前）
+    將二進制列表轉換為整數（高位在前）
     
     Args:
-        bits: 二進制列表，如 [1,0,1,0,1,0,1,0]（低位在前）
-              bits[0] 是 bit 0（最低位），bits[7] 是 bit 7（最高位）
+        bits: 二進制列表，如 [1,1,0,0,0,0,0,0]（高位在前）
+              bits[0] 是 bit 7（最高位），bits[7] 是 bit 0（最低位）
     
     Returns:
         int: 轉換後的整數值
     
     Example:
-        binary_list_to_int([1,0,1,0,1,0,1,0]) -> 85
-        binary_list_to_int([0,1,0,1,0,1,0,1]) -> 170
+        binary_list_to_int([1,1,0,0,0,0,0,0]) -> 0xC0 (192)
+        binary_list_to_int([0,0,0,0,0,0,1,1]) -> 0x03 (3)
     """
     if len(bits) != 8:
         raise ValueError(f"二進制列表長度錯誤: 需要 8 個位，實際 {len(bits)} 個")
@@ -161,8 +160,8 @@ def binary_list_to_int(bits: list) -> int:
     if not all(bit in [0, 1] for bit in bits):
         raise ValueError(f"二進制列表格式錯誤: 只能包含 0 或 1")
     
-    # 低位在前：bits[0] 是 bit 0，bits[i] 是 bit i
-    return sum(bit << i for i, bit in enumerate(bits))
+    # 高位在前：bits[0] 是 bit 7，bits[i] 是 bit (7-i)
+    return sum(bit << (7 - i) for i, bit in enumerate(bits))
 
 def _u8(x: int) -> int:
     """確保值在uint8範圍內"""

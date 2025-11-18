@@ -3,7 +3,7 @@
 """
 
 from utils import int_to_binary_list
-from config.constants import process_control_strategy,FIELD_OPERATION_MAP,BEGIN_END_STATUS_MAP
+from config.constants import CONTROL_STRATEGY_MAP,FIELD_OPERATION_MAP,BEGIN_END_STATUS_MAP,PLAN_ID_MAP
 
 
 def format_5f03_signal_status(signal_status_list, result=None):
@@ -84,7 +84,7 @@ F5_GROUP_DEFINITIONS = {
         
         # 统一字段列表，按順序定義，使用 index 表示位置
         "fields": [
-            {"name": "phase_order", "index": 2, "type": "uint8", "description": "時相編號"},
+            {"name": "時相編號", "index": 2, "type": "uint8", "description": "時相編號"},
             
             # signal_map 直接轉換為列表，不顯示原始值
             {
@@ -97,19 +97,19 @@ F5_GROUP_DEFINITIONS = {
                 # 結果：signal_map = [1, 0, 1, 0, 1, 0, 1, 0] 而不是 85
             },
             
-            {"name": "signal_count", "index": 4, "type": "uint8", "description": "信號燈數量"},
-            {"name": "sub_phase_id", "index": 5, "type": "uint8", "description": "分相序號"},
-            {"name": "step_id", "index": 6, "type": "uint8", "description": "步階序號"},
-            {"name": "step_sec", "index": 7, "type": "uint16", "endian": "big", "description": "步階秒數"},
+            {"name": "岔路數目", "index": 4, "type": "uint8", "description": "岔路數目"},
+            {"name": "分相序號", "index": 5, "type": "uint8", "description": "分相序號"},
+            {"name": "步階序號", "index": 6, "type": "uint8", "description": "步階序號"},
+            {"name": "步階秒數", "index": 7, "type": "uint16", "endian": "big", "description": "步階秒數"},
             
-            # 信號狀態列表：直接格式化為字符串列表
+            # 燈號狀態列表：直接格式化為字符串列表
             {
-                "name": "信號狀態列表",
+                "name": "燈號狀態列表",
                 "index": 8,
                 "type": "list",
                 "item_type": "uint8",
-                "count_from": "signal_count",
-                "description": "信號狀態列表",
+                "count_from": "岔路數目",
+                "description": "燈號狀態列表",
                 "post_process": format_5f03_signal_status
                 
             }
@@ -130,27 +130,26 @@ F5_GROUP_DEFINITIONS = {
         "group": "5F",
         "command": 0x13,
         "log_modes": ["command"],
-        "interaction_type": "multi_step",
         
         "steps": [
             {
                 "step": 1,
                 "name": "基本參數",
                 "description": "請輸入基本參數",
-                "fields": ["phase_order", "號誌位置圖", "signal_count", "sub_phase_count"],
-                "prompt": "步驟 1/3: 請輸入基本參數\n  <時相編號(hex)> <號誌位置圖(binary)> <信號燈數量> <綠燈分相數目>\n  範例: 40 10101010 8 3\n> "
+                "fields": ["時相編號", "號誌位置圖", "岔路數目", "綠燈分相數目"],
+                "prompt": "步驟 1/3: 請輸入基本參數\n  時相編號(hex) + 號誌位置圖(binary) + 信號燈數量 + 綠燈分相數目\n  範例: 40 10101010 8 3\n> "
             },
             {
                 "step": 2,
-                "name": "信號狀態列表",
-                "description": "請輸入信號狀態列表",
+                "name": "燈號狀態列表",
+                "description": "請輸入燈號狀態列表",
                 "fields": [],
                 "dynamic_count": {
-                    "field": "signal_count",
-                    "multiplier": "sub_phase_count"
+                    "field": "岔路數目",
+                    "multiplier": "綠燈分相數目"
                 },
-                "list_field_name": "信號狀態列表",
-                "prompt": "步驟 2/3: 請輸入信號狀態列表 (共 {total} 個值，用空格分隔)\n  需要 {signal_count} × {sub_phase_count} = {total} 個狀態值\n  範例: 85 85 85 85 85 85 85 85 85 85 85 85 85 85 85 85 85 85 85 85 85 85 85 85\n> "
+                "list_field_name": "燈號狀態列表",
+                "prompt": "步驟 2/3: 請輸入信號狀態列表 (共 {total} 個值，用空格分隔)\n  需要 {岔路數目} × {綠燈分相數目} = {total} 個狀態值\n  範例: 85 85 85 85 85 85 85 85 85 85 85 85 85 85 85 85 85 85 85 85 85 85 85 85\n> "
             },
             {
                 "step": 3,
@@ -164,42 +163,42 @@ F5_GROUP_DEFINITIONS = {
 
         "fields": [
             {
-                "name": "phase_order",
+                "name": "時相編號", # phase_order
                 "index": 2,
                 "type": "uint8",
                 "description": "時相編號",
                 "input_type": "hex"  
             },
             {
-                "name": "號誌位置圖",
+                "name": "號誌位置圖", # signal_map
                 "index": 3,
                 "type": "uint8",
                 "description": "號誌位置圖",
-                "input_type": "binary" # 低位在前二進制字符串
+                "input_type": "binary" # 高位在前二進制字符串
             },
             {
-                "name": "signal_count",
+                "name": "岔路數目", # signal_count
                 "index": 4,
                 "type": "uint8",
-                "description": "信號燈數量"
+                "description": "岔路數目"
             },
             {
-                "name": "sub_phase_count",
+                "name": "綠燈分相數目", # sub_phase_count
                 "index": 5,
                 "type": "uint8",
                 "description": "綠燈分相數目"
             },
             {
-                "name": "信號狀態列表",
+                "name": "燈號狀態列表", # signal_status_list
                 "index": 6,
                 "type": "list",
                 "item_type": "uint8",
                 "count_from": lambda result: result.get("signal_count", 0) * result.get("sub_phase_count", 0),
-                "description": "信號狀態列表（每個分相包含 SignalCount 個狀態，共 SubPhaseCount 個分相）"
+                "description": "燈號狀態列表（每個分相包含 SignalCount 個狀態，共 SubPhaseCount 個分相）"
             }
         ],
         
-        "format": "5F13 <phase_order> <號誌位置圖> <signal_count> <sub_phase_count> <信號狀態列表...>",
+        "format": "5F13 <時相編號(hex)> <號誌位置圖(binary)> <岔路數目> <綠燈分相數目> <燈號狀態列表>",
         "example": "5F13 40 10101010 8 3 85 85 85 85 85 85 85 85 85 85 85 85 85 85 85 85 85 85 85 85",
 
 
@@ -219,9 +218,19 @@ F5_GROUP_DEFINITIONS = {
         "command": 0x43,
         "log_modes": ["command"],
         
+        "steps": [
+            {
+                "step": 1,
+                "name": "參數輸入",
+                "description": "請輸入時相編號",
+                "fields": ["時相編號"],
+                "prompt": "請輸入參數: <時相編號(hex)>\n  範例: 5F43 64\n> "
+            }
+        ],  
+
         "fields": [
             {
-                "name": "phase_order",
+                "name": "時相編號",
                 "index": 2,
                 "type": "uint8",
                 "description": "時相編號",
@@ -229,7 +238,7 @@ F5_GROUP_DEFINITIONS = {
             }
         ],
         
-        "format": "5F43 <phase_order>",
+        "format": "5F43 <時相編號>",
         "example": "5F43 64",
                 
         "validation": {
@@ -249,7 +258,7 @@ F5_GROUP_DEFINITIONS = {
         "log_modes": ["receive", "command"],
         
         "fields": [
-            {"name": "phase_order", "index": 2, "type": "uint8", "description": "時相編號"},
+            {"name": "時相編號", "index": 2, "type": "uint8", "description": "時相編號"},
             {
                 "name": "號誌位置圖",
                 "index": 3,
@@ -257,15 +266,15 @@ F5_GROUP_DEFINITIONS = {
                 "description": "號誌位置圖",
                 "post_process": lambda value, result: f"0x{value:02X} = {int_to_binary_list(value)}"
             },
-            {"name": "signal_count", "index": 4, "type": "uint8", "description": "信號燈數量"},
-            {"name": "sub_phase_count", "index": 5, "type": "uint8", "description": "綠燈分相數目"},
+            {"name": "岔路數目", "index": 4, "type": "uint8", "description": "岔路數目"},
+            {"name": "綠燈分相數目", "index": 5, "type": "uint8", "description": "綠燈分相數目"},
             {
-                "name": "信號狀態列表",
+                "name": "燈號狀態列表",
                 "index": 6,
                 "type": "list",
                 "item_type": "uint8",
-                "count_from": lambda result: result.get("signal_count", 0) * result.get("sub_phase_count", 0),
-                "description": "信號狀態列表（每個分相包含 SignalCount 個狀態，共 SubPhaseCount 個分相）",
+                "count_from": lambda result: result.get("岔路數目", 0) * result.get("綠燈分相數目", 0),
+                "description": "燈號狀態列表（每個分相包含 岔路數目 個狀態，共 綠燈分相數目 個分相）",
                 "post_process": format_5f03_signal_status
             }
         ],
@@ -287,6 +296,16 @@ F5_GROUP_DEFINITIONS = {
         "command": 0x40,
         "log_modes": ["command"], 
 
+        "steps": [
+            {
+                "step": 1,
+                "name": "確認",
+                "description": "確認發送查詢指令",
+                "type": "confirmation",
+                "prompt": "確認發送 5F40 查詢指令？(y/n)\n> "
+            }
+        ],
+
         "fields": [],
         "format": "5F40",
         "example": "5F40",        
@@ -306,24 +325,34 @@ F5_GROUP_DEFINITIONS = {
         "group": "5F",
         "command": 0x10,
         "log_modes": ["command"],
+        
+        "steps": [
+            {
+                "step": 1,
+                "name": "參數輸入",
+                "description": "請輸入控制策略參數",
+                "fields": ["控制策略", "動態控制策略有效時間"]
+            }
+        ],
+        
         "fields": [
             {
-                "name": "control_strategy",
+                "name": "控制策略",
                 "index": 2,
                 "type": "uint8",
-                "description": "控制策略",
-                "input_type": "hex"
+                "description": "控制策略", # control_strategy
+                "input_type": "binary"
             },
             {
-                "name": "effect_time",
+                "name": "動態控制策略有效時間",
                 "index": 3,
                 "type": "uint8",
-                "description": "動態控制策略有效時間（分鐘，0~255，0為不計時）"
+                "description": "動態控制策略有效時間（分鐘，0~255，0為不計時）", # effect_time
             }
         ],
 
-        "format": "5F10 <control_strategy> <effect_time>",
-        "example": "5F10 03 60", # 3 = 16進位 0x03
+        "format": "5F10 <控制策略(binary)> <動態控制策略有效時間(分鐘)>\n\n  控制策略為8位二進制(高位在前)：\n    bit 0: 定時控制 (0x01)\n    bit 1: 動態控制 (0x02)\n    bit 2: 路口手動 (0x04)\n    bit 3: 中央手動 (0x08)\n    bit 4: 時相控制 (0x10)\n    bit 5: 即時控制 (0x20)\n    bit 6: 觸動控制 (0x40)\n    bit 7: 特別路線控制 (0x80)>\n",
+        "example": "5F10 00000011 60 (啟用定時控制+動態控制)", # 00000011 = 二進位 
 
         "validation": {
             "type": "exact_length",
@@ -342,20 +371,17 @@ F5_GROUP_DEFINITIONS = {
         "log_modes": ["receive", "command"],
         "fields": [
             {
-                "name": "control_strategy",
+                "name": "控制策略",
                 "index": 2,
                 "type": "uint8",
-                "description": "控制策略",
-                "post_process": lambda value, result: {
-                    "raw": value,
-                    **process_control_strategy(value)
-                }
+                "description": "控制策略", # control_strategy
+                "mapping": CONTROL_STRATEGY_MAP 
             },
             {
-                "name": "effect_time",
+                "name": "動態控制策略有效時間",
                 "index": 3,
                 "type": "uint8",
-                "description": "動態控制策略有效時間（分鐘，0~255，0為不計時）"
+                "description": "動態控制策略有效時間（分鐘，0~255，0為不計時）", # effect_time
             }
         ],
         "validation": {
@@ -372,24 +398,21 @@ F5_GROUP_DEFINITIONS = {
         "needs_ack": True,
         "group": "5F",
         "command": 0x00,
-        "log_modes": ["receive"],
+        "log_modes": ["receive", "command"],
         
         "fields": [
             {
-                "name": "control_strategy",
+                "name": "控制策略",
                 "index": 2,
                 "type": "uint8",
-                "description": "控制策略（只回報目前執行之控制策略的對應位元資料）",
-                "post_process": lambda value, result: {
-                    "raw": value,
-                    **process_control_strategy(value)
-                }
+                "description": "控制策略（只回報目前執行之控制策略的對應位元資料）", # control_strategy
+                "mapping": CONTROL_STRATEGY_MAP
             },
             {
-                "name": "begin_end",
+                "name": "控制策略狀態",
                 "index": 3,
                 "type": "uint8",
-                "description": "控制策略狀態",
+                "description": "控制策略狀態", # begin_end
                 "mapping": BEGIN_END_STATUS_MAP
             }
         ],
@@ -400,7 +423,158 @@ F5_GROUP_DEFINITIONS = {
             "error_message": "5F00資料長度錯誤，應為 5F 00 + ControlStrategy + BeginEnd"
         }
     },
+# =============時制計畫基本參數管理=============
+    "5F14": {
+        "name": "時制計畫基本參數管理",
+        "description": "設定路口時制計畫之基本參數",
+        "reply_type": "設定",
+        "needs_ack": True,
+        "group": "5F",
+        "command": 0x14,
+        "log_modes": ["command"],
+        
+        "steps": [
+            {
+                "step": 1,
+                "name": "基本參數",
+                "description": "請輸入基本參數",
+                "fields": ["時制計畫編號", "綠燈分相數目"],
+                "prompt": "步驟 1/3: 請輸入基本參數\n  時制計畫編號(1~40) + 綠燈分相數目(1~8)\n  範例: 1 3\n> "
+            },
+            {
+                "step": 2,
+                "name": "分相基本參數列表",
+                "description": "請輸入每個分相的基本參數",
+                "fields": [],
+                "dynamic_count": {
+                    "field": "綠燈分相數目",
+                    "multiplier": 6
+                },
+                "list_field_name": "分相基本參數列表",
+                "prompt": "步驟 2/3: 請輸入分相基本參數列表 (共 {total} 個值，用空格分隔)\n  每個分相需要 6 個參數：\n    1. 最短綠燈秒數 (0~255)\n    2. 最長綠燈秒數 (0~8190，系統會自動轉換為2字節)\n    3. 黃燈秒數 (0~9)\n    4. 全紅秒數 (0~9)\n    5. 行人綠閃秒數 (0~99)\n    6. 行人紅燈秒數 (0~99)\n  需要 {綠燈分相數目} 個分相 × 6 個參數 = {total} 個值\n  範例: 10 60 3 2 5 10 15 90 4 3 6 12 20 120 5 4 7 15\n> "
+            },
+            {
+                "step": 3,
+                "name": "確認",
+                "description": "確認並發送指令",
+                "type": "confirmation",
+                "preview": True,
+                "prompt": "步驟 3/3: 確認發送？(y/n)\n{preview}\n> "
+            }
+        ],
+        
+        "fields": [
+            {
+                "name": "時制計畫編號",
+                "index": 2,
+                "type": "uint8",
+                "description": "時制計畫編號 (0~48)",
+                "mapping": PLAN_ID_MAP
+            },
+            {
+                "name": "綠燈分相數目",
+                "index": 3,
+                "type": "uint8",
+                "description": "綠燈分相數目 (1~8)"
+            },
+            {
+                "name": "分相基本參數列表",
+                "index": 4,
+                "type": "list",
+                "item_type": "uint8",
+                "count_from": lambda result: result.get("綠燈分相數目", 0) * 7,  # 每个分相实际需要 7 个字节
+                "description": "分相基本參數列表（每個分相：MinGreen(1) + MaxGreen(2) + Yellow(1) + AllRed(1) + PedGreenFlash(1) + PedRed(1)）"
+            }
+        ],
+        
+        "format": "5F14 <時制計畫編號(1~40)> <綠燈分相數目(1~8)> <分相基本參數列表...>",
+        "example": "5F14 1 3 10 60 3 2 5 10 15 90 4 3 6 12 20 120 5 4 7 15",
+        
+        "validation": {
+            "type": "min_length",
+            "value": 4,
+            "error_message": "5F14資料長度不足"
+        }
+    },  
 
+    "5F44": {
+        "name": "時制計畫基本參數管理",
+        "description": "查詢路口時制計畫的基本參數",
+        "reply_type": "查詢",
+        "needs_ack": True,
+        "group": "5F",
+        "command": 0x44,
+        "log_modes": ["command"],
+        
+        "steps": [
+            {
+                "step": 1,
+                "name": "參數輸入",
+                "description": "請輸入時制計畫編號",
+                "fields": ["時制計畫編號"],
+                "prompt": "請輸入參數: <時制計畫編號(1~40)>\n  範例: 5F44 1 (查詢定時時制 PlanID: 1 的基本參數)\n> "
+            }
+        ],
+        
+        "fields": [
+            {
+                "name": "時制計畫編號",
+                "index": 2,
+                "type": "uint8",
+                "description": "時制計畫編號 (1~40)",
+                "mapping": PLAN_ID_MAP
+            }
+        ],
+        
+        "format": "5F44 <時制計畫編號(1~40)>",
+        "example": "5F44 1",
+        
+        "validation": {
+            "type": "exact_length",
+            "value": 3,
+            "error_message": "5F44資料長度錯誤，應為 5F 44 + PlanID"
+        }
+    },  
+
+# =============設定執行時制計畫=============  
+    "5F18": {
+        "name": "設定執行時制計畫",
+        "description": "選擇執行之時制計畫",
+        "reply_type": "設定",
+        "needs_ack": True,
+        "group": "5F",
+        "command": 0x18,
+        "log_modes": ["command"],
+        
+        "steps": [
+            {
+                "step": 1,
+                "name": "參數輸入",
+                "description": "請輸入時制計畫編號",
+                "fields": ["時制計畫編號"],
+                "prompt": "請輸入參數: <時制計畫編號(1~40)>\n  範例: 5F18 1 (選擇定時時制 PlanID: 1)\n> "
+            }
+        ],
+        
+        "fields": [
+            {
+                "name": "時制計畫編號",
+                "index": 2,
+                "type": "uint8",
+                "description": "時制計畫編號 (1~40)",
+                "mapping": PLAN_ID_MAP
+            }
+        ],
+        
+        "format": "5F18 <時制計畫編號(1~40)>",
+        "example": "5F18 1",
+        
+        "validation": {
+            "type": "exact_length",
+            "value": 3,
+            "error_message": "5F18資料長度錯誤，應為 5F 18 + PlanID"
+        }
+    },
 # =============現場操作回報=============    
     "5F08": {
         "name": "現場操作回報",
@@ -438,6 +612,17 @@ F5_GROUP_DEFINITIONS = {
         "group": "5F",
         "command": 0x48,
         "log_modes": ["command"],
+        
+        "steps": [
+            {
+                "step": 1,
+                "name": "確認",
+                "description": "確認發送查詢指令",
+                "type": "confirmation",
+                "prompt": "確認發送 5F48 查詢指令？(y/n)\n> "
+            }
+        ],
+
         "fields": [],
         "format": "5F48",
         "example": "5F48",
@@ -471,10 +656,10 @@ F5_GROUP_DEFINITIONS = {
                 "description": "基準方向"
             },
             {
-                "name": "時相種類編號",
+                "name": "時相編號",
                 "index": 4,
                 "type": "uint8",
-                "description": "時相種類編號"
+                "description": "時相編號"
             },
             {
                 "name": "綠燈分相數",
@@ -583,26 +768,23 @@ F5_GROUP_DEFINITIONS = {
         "log_modes": ["receive"],
         "fields": [
             {
-                "name": "control_strategy",
+                "name": "控制策略",
                 "index": 2,
                 "type": "uint8",
-                "description": "控制策略",
-                "post_process": lambda value, result: {
-                    "raw": value,
-                    **process_control_strategy(value)
-                }
+                "description": "控制策略", # control_strategy
+                "mapping": CONTROL_STRATEGY_MAP
             },
             {
-                "name": "sub_phase_id",
+                "name": "分相序號",
                 "index": 3,
                 "type": "uint8",
-                "description": "分相序號"
+                "description": "分相序號", # sub_phase_id
             },
             {
-                "name": "step_id",
+                "name": "步階序號",
                 "index": 4,
                 "type": "uint8",
-                "description": "步階序號"
+                "description": "步階序號", # step_id
             }
         ],
         "validation": {

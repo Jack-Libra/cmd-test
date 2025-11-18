@@ -2,7 +2,7 @@
 0F 群组封包定义
 """
 from utils import int_to_binary_list
-from config.constants import HARDWARE_STATUS_MAP,ERROR_CODE_CONFIG
+from config.constants import HARDWARE_STATUS_MAP, ERROR_CODE_MAP
 
 
 def format_0f04_hardware_status(hardware_status):
@@ -23,37 +23,6 @@ def format_0f04_hardware_status(hardware_status):
     
     return formatted_lines
 
-def format_0f81_error_code(error_code, result=None):
-    """格式化0F81錯誤碼為字符串列表"""
-    param_num = result.get("param_num", 0) if result else 0
-    errors = process_0f81_errors(error_code)
-    
-    formatted_lines = []
-    
-    for key, _, description, param_formatter in ERROR_CODE_CONFIG:
-        if errors.get(key):
-            error_text = description
-            if param_formatter:
-                error_text = f"{error_text}({param_formatter(param_num)})"
-            formatted_lines.append(f"   錯誤: {error_text}")
-    
-    if not formatted_lines:
-        formatted_lines.append(f"   錯誤: 未知錯誤(錯誤碼:0x{error_code:02X})")
-    
-    return formatted_lines
-    
-def process_0f81_errors(error_code):
-    """處理0F81錯誤碼"""
-    return {
-        "invalid_msg": bool(error_code & 0x01),
-        "no_response": bool(error_code & 0x02),
-        "param_invalid": bool(error_code & 0x04),
-        "no_param": bool(error_code & 0x08),
-        "prep_error": bool(error_code & 0x10),
-        "timeout": bool(error_code & 0x20),
-        "exceed_limit": bool(error_code & 0x40),
-        "reported": bool(error_code & 0x80)
-    }
 
 # 0F 群組封包定義
 F0_GROUP_DEFINITIONS = {
@@ -67,7 +36,7 @@ F0_GROUP_DEFINITIONS = {
         "log_modes": ["receive", "command"],
         "fields": [
             {
-                "name": "command_id",
+                "name": "指令ID",
                 "index": 2,  # payload[2] 和 payload[3] 组成 command_id (2 bytes)
                 "type": "uint16",
                 "endian": "big",
@@ -91,21 +60,21 @@ F0_GROUP_DEFINITIONS = {
         "log_modes": ["receive", "command"],
         "fields": [
             {
-                "name": "command_id",
+                "name": "指令ID",
                 "index": 2,  # payload[2] 和 payload[3]
                 "type": "uint16",
                 "endian": "big",
                 "description": "指令ID (2 bytes: 設備碼 + 指令碼)"
             },
             {
-                "name": "error_code",
+                "name": "錯誤碼",
                 "index": 4,  # payload[4]
                 "type": "uint8",
                 "description": "錯誤代碼",
-                "post_process": format_0f81_error_code
+                "mapping": ERROR_CODE_MAP
             },
             {
-                "name": "param_num",
+                "name": "參數編號",
                 "index": 5,  # payload[5]
                 "type": "uint8",
                 "description": "發生第一個錯誤參數值之位址或參數數目錯誤值"
@@ -128,7 +97,7 @@ F0_GROUP_DEFINITIONS = {
         "log_modes": ["receive"],
         "fields": [
             {
-                "name": "hardware_status",
+                "name": "硬體狀態碼",
                 "index": 2,  # PAYLOAD[2] 開始（0F 04 之後）
                 "type": "uint16",
                 "endian": "big",
@@ -153,25 +122,25 @@ F0_GROUP_DEFINITIONS = {
         "log_modes": ["receive","command"],
         "fields": [
             {
-                "name": "equipment_no",
+                "name": "設備序號",
                 "offset": 9,
                 "type": "uint8",
                 "description": "設備序號"
             },
             {
-                "name": "sub_count",
+                "name": "子設備數目",
                 "offset": 10,
                 "type": "uint8",
                 "description": "子設備數目"
             },
             {
-                "name": "sub_equipment_no",
+                "name": "子設備序號",
                 "offset": 11,
                 "type": "uint8",
                 "description": "子設備序號"
             },
             {
-                "name": "equipment_id",
+                "name": "設備編號",
                 "offset": 12,
                 "type": "uint8",
                 "optional": True,

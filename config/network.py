@@ -4,19 +4,17 @@ UDP傳輸層
 """
 
 import socket
-import logging
-
-
+import binascii
 class UDPTransport:
     """UDP傳輸層"""
     
     def __init__(self, local_ip, local_port, 
-                 server_ip, server_port):
+                 server_ip, server_port, logger):
         self.local_addr = (local_ip, local_port)
         self.server_addr = (server_ip, server_port)
         self.socket = None
-        self.buffer = PacketBuffer()
-        self.logger = logging.getLogger(__name__)
+        self.buffer = PacketBuffer(logger)
+        self.logger = logger
     
     def open(self):
         """開啟UDP連接"""
@@ -66,7 +64,7 @@ class UDPTransport:
         target_addr = addr if addr is not None else self.server_addr
         try:
             self.socket.sendto(data, target_addr)
-            self.logger.info(f"發送數據到 {target_addr[0]}:{target_addr[1]}")
+            #self.logger.info(f"發送數據到 {target_addr[0]}:{target_addr[1]}")
             return True
         except Exception as e:
             self.logger.error(f"發送數據失敗: {e}")
@@ -80,9 +78,9 @@ class UDPTransport:
 class PacketBuffer:
     """封包緩衝與切割（支持 DLE+STX/ACK）"""
     
-    def __init__(self):
+    def __init__(self, logger):
         self.buffer = bytearray()
-        self.logger = logging.getLogger(__name__)
+        self.logger = logger
     
     def feed(self, data):
         """喂入數據，返回完整封包列表"""
@@ -94,7 +92,7 @@ class PacketBuffer:
             
             if result is None:
                 if len(self.buffer) > 0:
-                    self.logger.debug(f"清空 {len(self.buffer)} bytes 無效數據")
+                    self.logger.info(f"清空 {len(self.buffer)} bytes 無效數據")
                 self.buffer.clear()
                 break
             
@@ -109,16 +107,17 @@ class PacketBuffer:
                     break
                 total = int.from_bytes(self.buffer[5:7], 'big')
             elif packet_type == 'ACK':
-                total = 9  # DLE ACK SEQ ADDR(2) LEN(2) CKS
+                total = 8  # DLE ACK SEQ ADDR(2) LEN(2) CKS
             else:
-                total = 10  # NAK
+                total = 9  # NAK
             
             if len(self.buffer) < total:
                 break  # 等待更多數據
             
             packet = bytes(self.buffer[:total])
             packets.append(packet)
-            self.logger.debug(f"提取封包: {len(packet)} bytes (type={packet_type})")
+            #packet_hex = binascii.hexlify(packet).decode('ascii').upper()
+            #self.logger.info(f"提取封包: {len(packet)} bytes (type={packet_type}), 封包內容: {packet_hex}")
             
             self.buffer = self.buffer[total:]
         

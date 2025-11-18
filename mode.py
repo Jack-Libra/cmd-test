@@ -12,7 +12,6 @@ from config.config import TCConfig
 from config.network import UDPTransport
 from packet.center import PacketCenter
 from packet.packet_definition import PacketDefinition
-from utils import validate_param_range
 
 from config.log_setup import setup_logging 
 import binascii
@@ -23,7 +22,7 @@ from command.step_processor import StepProcessor
 class Base:
     """基類：提供共同的初始化和接收功能"""
 
-    def __init__(self, device_id=3, mode: str = "receive"):
+    def __init__(self, device_id=3, mode = "receive"):
         self.mode = mode
         self.device_id = device_id
             
@@ -46,7 +45,8 @@ class Base:
             local_ip=self.config.get_transserver_ip(),
             local_port=self.config.get_transserver_port(),
             server_ip=self.config.get_tc_ip(),
-            server_port=self.config.get_tc_port()
+            server_port=self.config.get_tc_port(),
+            logger=self.logger
         )
         
         # 初始化封包註冊中心
@@ -66,7 +66,7 @@ class Base:
 
 
     def start(self):
-        """啟動系統（子類可覆寫）"""
+        """啟動系統"""
         if not self.network.open():
             self.logger.error("開啟 UDP 連接失敗")
             return False
@@ -82,7 +82,7 @@ class Base:
         self.logger.info("系統已停止")
     
     def _receive_loop(self):
-        """封包接收迴圈（子類可覆寫）"""
+        """封包接收迴圈"""
         self.logger.info("接收線程已啟動")
         
         while self.running:
@@ -92,13 +92,8 @@ class Base:
                     # 處理緩衝區，獲取完整幀列表
                     frames = self.network.process_buffer(data)
                     
-                    for frame in frames:
-                        # 檢查是否為原始ACK封包
-                        if len(frame) >= 3 and frame[0] == 0xAA and frame[1] == 0xDD:
-                            frame_hex = binascii.hexlify(frame).decode('ascii').upper()
-                            self.logger.info(f"收到原始ACK封包: {frame_hex} 來自 {addr[0]}:{addr[1]}")                        
-                        
-                        
+                    for frame in frames:                    
+
                         # 解析封包
                         packet = self.center.parse(frame)
                         if packet:
@@ -115,7 +110,7 @@ class Base:
         self.logger.info("接收線程已停止")
     
     def _handle_received_packet(self, packet, addr):
-        """處理接收到的封包（子類實現）"""
+        """處理接收到的封包"""
         pass
 
 class Receive(Base):
@@ -149,15 +144,13 @@ class Receive(Base):
         return True
     
     def _handle_received_packet(self, packet, addr):
-        """處理接收到的封包（覆寫基類方法，不發送ACK）"""
-        if not packet:
-            return
+        """處理接收到的封包（覆寫基類方法）"""
+
         
         # 處理封包(並發送ACK)
         #self.center.process(packet)
         self.center.process_and_ack(packet, addr)
         
-    
 class Command(Base):
     """指令下傳介面類：接收+命令雙線程，使用 seq 追蹤命令狀態"""
     
@@ -169,10 +162,6 @@ class Command(Base):
 
         self.session_manager = SessionManager(timeout=300)
         self.step_processor = StepProcessor(self.packet_def)
-        # 指令追蹤
-        self.pending_commands = {}  # {seq: command_info}
-        self.command_history = []   # 指令歷史記錄
-        self.pending_lock = threading.Lock()  # 保護 pending_commands
         
         # 命令線程
         self.command_thread = None
@@ -208,51 +197,18 @@ class Command(Base):
             self.stop()
         
         return True
-
-
-    
+   
     def _handle_received_packet(self, packet, addr):
         """處理接收到的封包（覆寫基類方法）"""
-        
-        command = packet.get("指令編號")
-        
-        # 檢查是否為指令回應（0F80/0F81/5F80/5F81）
-        if command in ["0F80", "0F81"]:
-            self.logger.info(f"處理 {command} 封包: {packet}")
-            self._handle_command_response(packet, addr)
-
-        self.center.process_and_ack(packet, addr)
-
-    def _handle_command_response(self, packet, addr):
-        """處理指令回應"""
-        seq = packet.get("序列號")
-        
-        with self.pending_lock:
-            if seq not in self.pending_commands:
-                return
-            
-            cmd_info = self.pending_commands[seq]
-            command = packet.get("指令編號")
-            
-            if command == "0F80":
-                cmd_info['status'] = 'success'
-                cmd_info['response_time'] = datetime.datetime.now().isoformat()
-                self.logger.info(f"✓ 指令執行成功: {cmd_info['description']}")
-            elif command == "0F81":
-                error_code = packet.get("錯誤碼", 0)
-                cmd_info['status'] = 'failed'
-                cmd_info['error_code'] = error_code
-                cmd_info['response_time'] = datetime.datetime.now().isoformat()
-                self.logger.error(f"✗ 指令執行失敗: {cmd_info['description']} (錯誤碼: 0x{error_code:02X})")
-            
-            self.command_history.append(cmd_info)
-            del self.pending_commands[seq]
+        # 统一处理所有封包，包括 0F80/0F81
+        self.center.process_and_ack(packet, addr)        
 
 
 # =============命令迴圈=============    
 
     def _command_loop(self):
         """指令輸入迴圈"""
+        
         self._show_help()
         
         while self.running:
@@ -260,17 +216,15 @@ class Command(Base):
                 # 檢查活動會話
                 active_session = self.session_manager.get_active_session()
                 
-                if active_session:
-                    prompt = self.step_processor.get_step_prompt(active_session)
-                else:
-                    prompt = "\n請輸入指令 (輸入 'help' 查看說明): "
+                prompt = self.step_processor.get_step_prompt(active_session) if active_session else ""
+       
+                user_input = input(prompt).strip() # 字串
                 
-                command_input = input(prompt).strip()
-                if not command_input:
+                if not user_input:
                     continue
                 
                 # 處理會話命令
-                if command_input.lower() == 'cancel' and active_session:
+                if user_input.lower() == 'cancel' and active_session:
                     self.session_manager.remove_session(active_session["cmd_code"])
                     print("已取消當前指令輸入")
                     continue
@@ -278,156 +232,122 @@ class Command(Base):
                 # 如果有活動會話，處理步驟輸入
                 if active_session:
                     success, message, is_complete = self.step_processor.process_step(
-                        active_session, command_input
+                        active_session, user_input
                     )
                     print(message)
                     
                     if is_complete and success:
                         # 發送指令
                         fields = self.step_processor.get_session_fields(active_session)
-                        self._send_multi_step_command(active_session, fields)
+                        cmd_code = active_session["cmd_code"]
+                        
+                        description = active_session["definition"].get("description", active_session["cmd_code"])
+                        
+                        self._send_and_register_command(cmd_code, fields, description)
+                        
                         self.session_manager.remove_session(active_session["cmd_code"])
-                    elif not success:
-                        # 顯示錯誤，繼續當前步驟
-                        continue
+
                     continue
+
                 
                 # 處理普通命令
-                if command_input.lower() == 'quit':
+                if user_input.lower() == 'quit':
                     break
-                elif command_input.lower() == 'help':
+                elif user_input.lower() == 'help':
                     self._show_help()
-                elif command_input.lower() == 'status':
+                elif user_input.lower() == 'status':
                     self._show_status()
-                elif command_input.lower() == 'history':
-                    self._show_history()
                 else:
-                    self._execute_command(command_input)
+                    self._execute_command(user_input)
                         
             except KeyboardInterrupt:
                 # 取消活動會話
                 active_session = self.session_manager.get_active_session()
-                if active_session:
+                
+                if active_session:  
                     self.session_manager.remove_session(active_session["cmd_code"])
+                
                     print("\n已取消當前指令輸入")
+                
                 break
+            
             except Exception as e:
                 self.logger.info(f"指令處理錯誤: {e}")
         
         self.running = False
 
-    def _execute_command(self, command_input):
+    def _execute_command(self, user_input):
         """執行指令"""
         try:
-            parts = command_input.split()
-            if not parts:
-                return
+
             
-            cmd_type = parts[0].upper()
-            definition = self.packet_def.get_definition(cmd_type)
+            cmd = user_input.upper().split()[0]
+
+            definition = self.packet_def.get_definition(cmd)
             
             if not definition:
-                print(f"不支援的指令類型: {cmd_type}")
+                print(f"不支援的指令類型: {cmd}")
                 return
             
             if definition.get("reply_type") not in ["查詢", "設定"]:
-                print(f"{cmd_type} 不是可執行命令")
+                print(f"{cmd} 不是可執行命令")
                 return
             
-            # 檢查是否為多步驟指令（修改）
-            if definition.get("interaction_type") == "multi_step":
-                # 檢查是否已有活動會話
-                if self.session_manager.get_active_session():
-                    print("已有進行中的指令輸入，請先完成或取消 (輸入 'cancel')")
+            steps = definition.get("steps", [])
+            if not steps:
+                print(f"錯誤: {cmd} 缺少 steps 定義")
+                return
+            
+            # 判斷是單步還是多步
+            is_single_step = len(steps) == 1 and steps[0].get("type") != "confirmation"
+            has_params = len(user_input.split()) > 1
+            
+            if is_single_step:
+                # 單步指令：必須帶參數
+                if not has_params:
+                    format = definition.get("format")
+                    example = definition.get("example")
+                    print(f"{cmd} 需要參數\n格式: {format}\n範例: {example}")
                     return
                 
+                # 創建會話，處理單步
+                session = self.session_manager.create_session(cmd, definition)
+                
+                param_str = " ".join(user_input.split()[1:]) # 字串
+                
+                success, message, is_complete = self.step_processor.process_step(session, param_str)
+                
+                if success and is_complete:
+                    fields = self.step_processor.get_session_fields(session)
+                    description = definition.get("description")
+                    
+                    self._send_and_register_command(cmd, fields, description)
+                    self.session_manager.remove_session(cmd)
+                else:
+                    print(message)
+                    self.session_manager.remove_session(cmd)
+            else:
+                # 無參數查詢指令:確認提示(step1)
+                # 多步指令：統一進入互動模式(step1)，忽略參數
                 # 創建會話並開始多步驟輸入
-                session = self.session_manager.create_session(cmd_type, definition)
-                prompt = self.step_processor.get_step_prompt(session)
-                print(prompt)
-                return
-            
-            # 原有的單步處理邏輯
-            fields = definition.get("fields", [])
+                session = self.session_manager.create_session(cmd, definition)
 
-            # 檢查列表參數
-            if any(f.get("type") == "list" for f in fields):
-                print(f"{cmd_type} 指令包含列表參數，目前不支援單步輸入，請使用多步驟模式")
-                return
+
             
-            # 檢查參數數量
-            if len(parts[1:]) < len(fields):
-                format_str = definition.get("format", cmd_type)
-                example_str = definition.get("example", cmd_type)
-                print(f"{cmd_type} 指令參數不足\n格式: {format_str}\n範例: {example_str}")
-                return
-            
-            # 解析參數
-            fields_dict = {}
-            description_parts = [definition.get("description", cmd_type)]
-            
-            for i, field in enumerate(fields):
-                field_name = field.get("name", f"參數{i}")
-                
-                try:
-                    # 使用 PacketDefinition 的 parse_input 方法
-                    value = self.packet_def.parse_input(parts[1:][i], field, field_name)
-                    
-                    # 使用 utils 的 validate_param_range 方法
-                    min_val = field.get("min", 0)
-                    max_val = field.get("max", 0xFF)
-                    validate_param_range(value, field_name, min_val, max_val)
-                    
-                    fields_dict[field_name] = value
-                    description_parts.append(f"{field_name}:0x{value:02X}")
-                    
-                except ValueError as e:
-                    print(str(e))
-                    return
-            
-            # 發送命令並註冊
-            description = " ".join(description_parts)
-            seq = self._send_command(cmd_type, fields_dict, description)
-            if seq:
-                self._register_command(cmd_type, seq, definition)
-        
         except Exception as e:
             print(f"指令執行錯誤: {e}")
-
-    def _send_multi_step_command(self, session, fields):
-        """
-        發送多步驟指令
-        
-        Args:
-            session: 會話字典
-            fields: 字段字典
-        """
-        cmd_code = session["cmd_code"]
-        definition = session["definition"]
-        
-        # 構建描述
-        description_parts = [definition.get("description", cmd_code)]
-        for field_name, value in fields.items():
-            if isinstance(value, list):
-                description_parts.append(f"{field_name}:[{len(value)}個值]")
-            else:
-                description_parts.append(f"{field_name}:0x{value:02X}")
-        
-        description = " ".join(description_parts)
-        
-        # 發送命令
-        seq = self._send_command(cmd_code, fields, description)
-        if seq:
-            self._register_command(cmd_code, seq, definition)
-     
-    def _send_command(self, cmd_code, fields, description):
+   
+    def _send_and_register_command(self, cmd, fields, description):
         """發送指令封包"""
         try:
             seq = self.center.next_seq()
-            frame = self.center.build(cmd_code, fields, seq=seq, addr=self.tc_id)
+
+            # 構建封包
+            frame = self.center.build(cmd, fields, seq=seq, addr=self.tc_id)
             
+            # 發送封包
             if not frame:
-                print(f"構建封包失敗: {cmd_code}")
+                print(f"構建封包失敗: {cmd}")
                 return None
             
             addr = (self.config.get_tc_ip(), self.config.get_tc_port())
@@ -444,75 +364,38 @@ class Command(Base):
             print(f"發送失敗: {e}")
             return None
 
-    def _register_command(self, cmd_code, seq, definition):
-        """註冊命令到待處理列表"""
-        cmd_info = {
-            '序列號': seq,
-            '號誌控制器ID': self.tc_id,
-            '指令': cmd_code,
-            'description': definition.get('description', cmd_code),
-            'send_time': datetime.datetime.now().isoformat(),
-            'status': 'pending'
-        }
-        with self.pending_lock:
-            self.pending_commands[seq] = cmd_info
-        print(f"指令已發送 (SEQ: {seq})")
 
 # =============顯示說明=============    
 
     def _show_help(self):
         """顯示說明"""
         print(f"交通控制系統指令下傳介面 - TC{self.tc_id:03d}")
-        print(f"可用指令: help, status, history, quit")
+        print(f"可用指令: help, status, quit")
         
         # 動態獲取可執行命令
         executable_commands = {}
-        for cmd_code, definition in self.packet_def.definitions.items():
+        for cmd, definition in self.packet_def.definitions.items():
             if definition.get("reply_type") in ["查詢", "設定"]:
-                executable_commands[cmd_code] = definition
+                executable_commands[cmd] = definition
         
         if executable_commands:
             print(f"\n封包指令:")
-            for cmd_code, definition in sorted(executable_commands.items()):
-                format_str = definition.get("format", cmd_code)
-                desc = definition.get("description", cmd_code)
-                print(f"  {format_str:<45} - {desc}")
-            
-            print(f"\n範例:")
-            for cmd_code, definition in sorted(executable_commands.items()):
-                example = definition.get("example", cmd_code)
-                print(f"  {example}")
+            for cmd, definition in sorted(executable_commands.items()):
+                format = definition.get("format")
+                desc = definition.get("description")
+                example = definition.get("example")
+                print(f"{desc} - {format}")
+                print(f"範例: {example}\n")
+
+        print("\n請輸入指令 (輸入 'help' 查看說明): ")
         
     def _show_status(self):
-        """顯示系統狀態"""
-        with self.pending_lock:
-            pending_count = len(self.pending_commands)
-        
+        """顯示系統狀態"""     
         print(f"\n系統狀態:")
         print(f"  控制器ID: TC{self.tc_id:03d}")
-        print(f"  待處理指令: {pending_count}")
-        print(f"  指令歷史: {len(self.command_history)}")
+
         
-        if pending_count > 0:
-            print("\n待處理指令:")
-            with self.pending_lock:
-                for seq, cmd_info in self.pending_commands.items():
-                    print(f"  SEQ {seq}: {cmd_info['description']} ({cmd_info['send_time']})")
-    
-    def _show_history(self):
-        """顯示指令歷史"""
-        if not self.command_history:
-            print("\n無指令歷史記錄")
-            return
-        
-        print(f"\n指令歷史 (最近 {min(10, len(self.command_history))} 筆):")
-        for cmd_info in self.command_history[-10:]:
-            icon = "✓" if cmd_info['status'] == 'success' else "✗"
-            print(f"  {icon} {cmd_info['description']}")
-            print(f"    發送: {cmd_info['send_time']}")
-            print(f"    回應: {cmd_info.get('response_time', '未回應')}")
-            if cmd_info['status'] == 'failed':
-                print(f"    錯誤: 0x{cmd_info.get('error_code', 0):02X}")
+
 
 
 

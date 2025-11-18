@@ -4,7 +4,6 @@
 """
 
 import datetime
-from typing import Dict, Tuple, Optional, List
 from utils import validate_param_range
 
 
@@ -12,15 +11,10 @@ class StepProcessor:
     """步驟處理器"""
     
     def __init__(self, packet_def):
-        """
-        初始化步驟處理器
-        
-        Args:
-            packet_def: PacketDefinition 實例
-        """
+
         self.packet_def = packet_def
     
-    def get_step_prompt(self, session: Dict) -> str:
+    def get_step_prompt(self, session):
         """
         獲取當前步驟的提示信息
         
@@ -63,13 +57,13 @@ class StepProcessor:
         except KeyError as e:
             return f"提示格式錯誤: 缺少變量 {e}"
     
-    def process_step(self, session: Dict, user_input: str) -> Tuple[bool, str, bool]:
+    def process_step(self, session, user_input):
         """
         處理步驟輸入
         
         Args:
             session: 會話字典
-            user_input: 用戶輸入
+            input: 用戶輸入
             
         Returns:
             (success, message, is_complete)
@@ -80,16 +74,21 @@ class StepProcessor:
         
         # 處理確認步驟
         if step_config.get("type") == "confirmation":
-            return self._handle_confirmation(session, user_input)
+            
+            if user_input.strip().lower() in ['y', 'yes', '是', '確認', 'ok','']:
+                return True, "指令已確認，準備發送", True
+            elif user_input.strip().lower() in ['n', 'no', '否', '取消', 'cancel']:
+                return False, "指令已取消", True
+            else:
+                return False, "請輸入 y(確認) 或 n(取消)", False
+            
         
-        # 解析輸入
-        parts = user_input.strip().split()
-        if not parts:
-            return False, "錯誤: 輸入為空", False
+        # 解析輸入(字串→列表)
+        parts = user_input.split()
         
         # 驗證和解析輸入
         errors = []
-        fields_to_parse = step_config.get("fields", [])
+        fields_to_parse = step_config.get("fields")
         
         # 處理固定字段
         for i, field_name in enumerate(fields_to_parse):
@@ -122,8 +121,8 @@ class StepProcessor:
         # 處理動態列表字段
         if "dynamic_count" in step_config:
             dc = step_config["dynamic_count"]
-            field_value = session["fields"].get(dc["field"], 0)
-            multiplier_value = session["fields"].get(dc["multiplier"], 0)
+            field_value = session["fields"].get(dc["field"])
+            multiplier_value = session["fields"].get(dc["multiplier"])
             total_count = field_value * multiplier_value
             
             if len(parts) < len(fields_to_parse) + total_count:
@@ -160,27 +159,8 @@ class StepProcessor:
         next_prompt = self.get_step_prompt(session)
         return True, next_prompt, False
     
-    def _handle_confirmation(self, session: Dict, user_input: str) -> Tuple[bool, str, bool]:
-        """
-        處理確認步驟
-        
-        Args:
-            session: 會話字典
-            user_input: 用戶輸入
-            
-        Returns:
-            (success, message, is_complete)
-        """
-        user_input = user_input.strip().lower()
-        
-        if user_input in ['y', 'yes', '是', '確認', 'ok']:
-            return True, "指令已確認，準備發送", True
-        elif user_input in ['n', 'no', '否', '取消', 'cancel']:
-            return False, "指令已取消", True
-        else:
-            return False, "請輸入 y(確認) 或 n(取消)", False
     
-    def _generate_preview(self, session: Dict) -> str:
+    def _generate_preview(self, session):
         """
         生成預覽信息
         
@@ -208,7 +188,7 @@ class StepProcessor:
         
         return "\n".join(lines)
     
-    def _get_step_config(self, session: Dict, step_num: int) -> Optional[Dict]:
+    def _get_step_config(self, session, step_num):
         """
         獲取步驟配置
         
@@ -225,11 +205,7 @@ class StepProcessor:
                 return step_config
         return None
     
-
-    
-
-    
-    def get_session_fields(self, session: Dict) -> Dict:
+    def get_session_fields(self, session):
         """
         獲取會話的所有字段數據
         

@@ -93,7 +93,7 @@ class PacketCenter:
                     f"回應封包={command}\n"
                     f"{'='*60}"
                 )
-                self.logger.info(log_msg)
+                #self.logger.info(log_msg)
         except Exception as e:
             self.logger.error(f"發送ACK失敗: {e}")
         

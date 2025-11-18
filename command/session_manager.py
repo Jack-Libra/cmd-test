@@ -4,25 +4,24 @@
 """
 
 import datetime
-from typing import Dict, Optional
 import threading
 
 
 class SessionManager:
     """指令會話管理器"""
     
-    def __init__(self, timeout: int = 300):
+    def __init__(self, timeout=300):
         """
         初始化會話管理器
         
         Args:
             timeout: 會話超時時間（秒），默認5分鐘
         """
-        self.active_sessions: Dict[str, Dict] = {}
+        self.active_sessions = {}
         self.timeout = timeout
         self.lock = threading.Lock()
     
-    def create_session(self, cmd_code: str, definition: Dict) -> Dict:
+    def create_session(self, cmd_code, definition):
         """
         創建新會話
         
@@ -49,7 +48,7 @@ class SessionManager:
         
         return session
     
-    def get_active_session(self) -> Optional[Dict]:
+    def get_active_session(self):
         """
         獲取當前活動會話
         
@@ -65,7 +64,7 @@ class SessionManager:
                 return next(iter(self.active_sessions.values()))
             return None
     
-    def get_session(self, cmd_code: str) -> Optional[Dict]:
+    def get_session(self, cmd_code):
         """
         獲取指定指令的會話
         
@@ -84,7 +83,7 @@ class SessionManager:
                     return None
             return session
     
-    def remove_session(self, cmd_code: str):
+    def remove_session(self, cmd_code):
         """
         移除會話
         
@@ -94,7 +93,7 @@ class SessionManager:
         with self.lock:
             self.active_sessions.pop(cmd_code, None)
     
-    def update_session(self, cmd_code: str, updates: Dict):
+    def update_session(self, cmd_code, updates):
         """
         更新會話
         
@@ -108,7 +107,7 @@ class SessionManager:
                 session.update(updates)
                 session["last_updated"] = datetime.datetime.now()
     
-    def _is_expired(self, session: Dict) -> bool:
+    def _is_expired(self, session):
         """
         檢查會話是否過期
         

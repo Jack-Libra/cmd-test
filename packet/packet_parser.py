@@ -3,16 +3,15 @@
 """
 import binascii
 from utils import FrameDecoder
-from packet.packet_definition import PacketDefinition
 from config.log_setup import get_logger
 import datetime
 
 class PacketParser:
     """封包解析器"""
     
-    def __init__(self,  mode="receive"):
+    def __init__(self, packet_def, mode="receive"):
         self.logger = get_logger(f"tc.{mode}")
-        self.packet_def = PacketDefinition()
+        self.packet_def = packet_def
         self.sub_parser = SubParser(packet_def=self.packet_def)
         self.frame_decoder = FrameDecoder()
     
@@ -54,7 +53,7 @@ class PacketParser:
         cmd_code = f"{command_prefix:02X}{command_suffix:02X}"
         
         # 查找定義
-        definition = self.packet_def.get_definition(cmd_code=cmd_code)
+        definition = self.packet_def.get_definition(cmd_code)
         
         header = {
         "序列號": decoded["seq"],
@@ -133,14 +132,18 @@ class SubParser:
             value = self._parse_field_by_type(payload, field, actual_index, result)
             
             if value is not None:
-                # 應用映射（如果有）
+                # 映射 (字典映射或函數映射)
                 if "mapping" in field:
+                    
                     mapping = field["mapping"]
-                    processed_value = mapping.get(value, f"未知(0x{value:02X})")
+                    try:
+                        processed_value = mapping.get(value, f"未知(0x{value:02X})")
+                    except AttributeError:
+                        processed_value = mapping(value)
                 else:
                     processed_value = value
-                
-                #應用後處理（如果有）
+                            
+                #應用後處理
                 if "post_process" in field:
                     result[field_name] = field["post_process"](processed_value, result)
                 else:
@@ -149,7 +152,7 @@ class SubParser:
                 result[field_name] = None
             
             # 更新當前索引（用於下一個字段）
-            if field_index != "dynamic" and field_index is not None:
+            if field_index != "dynamic":
                 current_index = self._calculate_next_index(
                     actual_index, field_type, field, value, result
                 )

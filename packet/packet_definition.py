@@ -96,14 +96,14 @@ class PacketDefinition:
                 return field
         return None       
 
-    def parse_input(self, value_str: str, field_def: Dict, param_name: str = None) -> int:
+    def parse_input(self, value_str, field_def, param_name):
         """
         從用戶輸入字符串解析參數值
         
         Args:
             value_str: 參數字符串
             field_def: 字段定義字典
-            param_name: 參數名稱（用於錯誤提示），如果為None則從field_def獲取
+            param_name: 參數名稱（用於錯誤提示）
             
         Returns:
             解析後的數值
@@ -111,9 +111,6 @@ class PacketDefinition:
         Raises:
             ValueError: 解析失敗
         """
-        if param_name is None:
-            param_name = field_def.get("name", "參數")
-        
         field_type = field_def.get("type", "uint8")
         input_type = field_def.get("input_type", "dec")
         

@@ -6,7 +6,7 @@
 
 import logging
 from utils import MessageFrame
-from packet.packet_definition import PacketDefinition
+
 
 
 class PacketBuilder:
@@ -14,7 +14,7 @@ class PacketBuilder:
     
     def __init__(self, packet_def):
         self.logger = logging.getLogger(__name__)
-        self.packet_def = PacketDefinition()
+        self.packet_def = packet_def
         self.sub_builder = SubBuilder(packet_def=self.packet_def)
     
     def build(self, cmd_code, fields, seq=1, addr=0):
