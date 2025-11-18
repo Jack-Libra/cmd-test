@@ -9,45 +9,30 @@ import threading
 import time
 import datetime
 from config.config import TCConfig
-from config.network import UDPTransport
+from config.network import NetworkTransport
 from packet.center import PacketCenter
 from packet.packet_definition import PacketDefinition
-
-from config.log_setup import setup_logging 
 import binascii
-
 from command.session_manager import SessionManager
 from command.step_processor import StepProcessor
 
 class Base:
     """基類：提供共同的初始化和接收功能"""
 
-    def __init__(self, device_id=3, mode = "receive"):
-        self.mode = mode
-        self.device_id = device_id
-            
-        # 設置日誌文件名
-        log_file_map = {
-            "receive": "receive.log",
-            "command": "command.log",
-        }
-        log_file = log_file_map.get(mode, "receive.log")
+    def __init__(self, device_id=3, mode = "receive",network: NetworkTransport = None, logger=None):
         
-        # 初始化日誌
-        self.logger = setup_logging(log_file=log_file, mode=mode)
+        self.mode = mode
+        
+        self.device_id = device_id     
+        
+        self.logger = logger
         
         self.config = TCConfig(device_id)
         
         self.tc_id = device_id
         
         # 初始化網路
-        self.network = UDPTransport(
-            local_ip=self.config.get_transserver_ip(),
-            local_port=self.config.get_transserver_port(),
-            server_ip=self.config.get_tc_ip(),
-            server_port=self.config.get_tc_port(),
-            logger=self.logger
-        )
+        self.network = network
         
         # 初始化封包註冊中心
         self.center = PacketCenter(
@@ -92,7 +77,11 @@ class Base:
                     # 處理緩衝區，獲取完整幀列表
                     frames = self.network.process_buffer(data)
                     
-                    for frame in frames:                    
+                    for frame in frames:
+                        #if frame[0] == 0xAA and frame[1] == 0xDD:
+                            #frame_hex = binascii.hexlify(frame).decode('ascii').upper()
+                            #self.logger.info(f"接收ACK封包: {frame_hex}")
+
 
                         # 解析封包
                         packet = self.center.parse(frame)
@@ -115,8 +104,8 @@ class Base:
 
 class Receive(Base):
     """接收模式：只接收數據，不發送命令"""
-    def __init__(self, device_id=3, mode: str = "receive"):
-        super().__init__(device_id, mode)
+    def __init__(self, device_id=3, mode: str = "receive" , network: NetworkTransport = None, logger=None):
+        super().__init__(device_id, mode, network, logger)
 
     def start(self):
         """啟動接收模式"""
@@ -154,9 +143,9 @@ class Receive(Base):
 class Command(Base):
     """指令下傳介面類：接收+命令雙線程，使用 seq 追蹤命令狀態"""
     
-    def __init__(self, device_id=3, mode="command"):
+    def __init__(self, device_id=3, mode="command", network: NetworkTransport = None, logger=None):
         
-        super().__init__(device_id, mode)
+        super().__init__(device_id, mode, network, logger)
 
         self.packet_def = PacketDefinition()
 

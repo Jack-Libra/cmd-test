@@ -5,6 +5,17 @@ UDP傳輸層
 
 import socket
 import binascii
+from typing import Protocol, Tuple, Optional
+#from abc import ABC, abstractmethod
+
+class NetworkTransport(Protocol):
+    """網絡傳輸協議接口"""
+    def open(self) -> bool: ...
+    def close(self) -> None: ...
+    def send_data(self, data: bytes, addr: Optional[Tuple[str, int]] = None) -> bool: ...
+    def receive_data(self) -> Tuple[bytes, Optional[Tuple[str, int]]]: ...
+    def process_buffer(self, data: bytes) -> list: ...
+
 class UDPTransport:
     """UDP傳輸層"""
     
