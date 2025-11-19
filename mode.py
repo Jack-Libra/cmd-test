@@ -7,25 +7,28 @@
 
 import threading
 import time
-import datetime
+from typing import Optional
+import binascii
+
 from config.config import TCConfig
 from config.network import NetworkTransport
 from packet.center import PacketCenter
 from packet.packet_definition import PacketDefinition
-import binascii
+
 from command.session_manager import SessionManager
 from command.step_processor import StepProcessor
+from config.log_setup import get_logger
 
 class Base:
     """基類：提供共同的初始化和接收功能"""
 
-    def __init__(self, device_id=3, mode = "receive",network: NetworkTransport = None, logger=None):
+    def __init__(self, device_id=3, mode = "receive", network: Optional[NetworkTransport] = None, logger=None):
         
         self.mode = mode
         
         self.device_id = device_id     
         
-        self.logger = logger
+        self.logger = logger if logger else get_logger(f"tc.{mode}")
         
         self.config = TCConfig(device_id)
         
@@ -214,7 +217,7 @@ class Command(Base):
                 
                 # 處理會話命令
                 if user_input.lower() == 'cancel' and active_session:
-                    self.session_manager.remove_session(active_session["cmd_code"])
+                    self.session_manager.remove_session(active_session.cmd_code)
                     print("已取消當前指令輸入")
                     continue
                 
@@ -228,13 +231,13 @@ class Command(Base):
                     if is_complete and success:
                         # 發送指令
                         fields = self.step_processor.get_session_fields(active_session)
-                        cmd_code = active_session["cmd_code"]
+                        cmd_code = active_session.cmd_code
                         
-                        description = active_session["definition"].get("description", active_session["cmd_code"])
+                        description = active_session.definition.get("description", active_session.cmd_code)
                         
                         self._send_and_register_command(cmd_code, fields, description)
                         
-                        self.session_manager.remove_session(active_session["cmd_code"])
+                        self.session_manager.remove_session(active_session.cmd_code)
 
                     continue
 
@@ -254,7 +257,7 @@ class Command(Base):
                 active_session = self.session_manager.get_active_session()
                 
                 if active_session:  
-                    self.session_manager.remove_session(active_session["cmd_code"])
+                    self.session_manager.remove_session(active_session.cmd_code)
                 
                     print("\n已取消當前指令輸入")
                 

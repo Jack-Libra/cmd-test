@@ -24,7 +24,7 @@ class StepProcessor:
         Returns:
             提示字符串
         """
-        step_config = self._get_step_config(session, session["current_step"])
+        step_config = self._get_step_config(session, session.current_step)
         if not step_config:
             return "錯誤: 無法獲取步驟配置"
         
@@ -32,17 +32,17 @@ class StepProcessor:
         
         # 準備替換變量
         replacements = {
-            "step": session["current_step"],
-            "total": session["total_steps"],
+            "step": session.current_step,
+            "total": session.total_steps,
             "description": step_config.get("description", ""),
-            **session["fields"]  # 已輸入的字段值
+            **session.fields  # 已輸入的字段值
         }
         
         # 處理動態計數
         if "dynamic_count" in step_config:
             dc = step_config["dynamic_count"]
-            field_value = session["fields"].get(dc["field"], 0)
-            multiplier_value = session["fields"].get(dc["multiplier"], 0)
+            field_value = session.fields.get(dc["field"])
+            multiplier_value = session.fields.get(dc["multiplier"])
             total = field_value * multiplier_value
             replacements["total"] = total
         
@@ -68,7 +68,7 @@ class StepProcessor:
         Returns:
             (success, message, is_complete)
         """
-        step_config = self._get_step_config(session, session["current_step"])
+        step_config = self._get_step_config(session, session.current_step)
         if not step_config:
             return False, "錯誤: 無法獲取步驟配置", False
         
@@ -97,7 +97,7 @@ class StepProcessor:
                 continue
             
             # 獲取字段定義
-            field_def = self.packet_def.get_field_definition(session["definition"], field_name)
+            field_def = self.packet_def.get_field_definition(session.definition, field_name)
             if not field_def:
                 errors.append(f"未找到字段定義: {field_name}")
                 continue
@@ -112,7 +112,7 @@ class StepProcessor:
                 validate_param_range(value, field_name, min_val, max_val)
 
                 
-                session["fields"][field_name] = value
+                session.fields[field_name] = value
                 
             except ValueError as e:
                 errors.append(str(e))
@@ -121,8 +121,8 @@ class StepProcessor:
         # 處理動態列表字段
         if "dynamic_count" in step_config:
             dc = step_config["dynamic_count"]
-            field_value = session["fields"].get(dc["field"])
-            multiplier_value = session["fields"].get(dc["multiplier"])
+            field_value = session.fields.get(dc["field"])
+            multiplier_value = session.fields.get(dc["multiplier"])
             total_count = field_value * multiplier_value
             
             if len(parts) < len(fields_to_parse) + total_count:
@@ -142,17 +142,17 @@ class StepProcessor:
                 if not errors:
                     # 使用步驟配置中指定的字段名，或默認使用 "信號狀態列表"
                     list_field_name = step_config.get("list_field_name", "信號狀態列表")
-                    session["fields"][list_field_name] = list_values
+                    session.fields[list_field_name] = list_values
         
         if errors:
             return False, "\n".join(errors), False
         
         # 進入下一步
-        session["current_step"] += 1
-        session["last_updated"] = datetime.datetime.now()
+        session.current_step += 1
+        session.update_timestamp()
         
         # 檢查是否完成
-        if session["current_step"] > session["total_steps"]:
+        if session.current_step > session.total_steps:
             return True, "所有步驟完成，準備發送", True
         
         # 獲取下一步提示
@@ -170,11 +170,11 @@ class StepProcessor:
         Returns:
             預覽字符串
         """
-        lines = [f"\n指令: {session['cmd_code']}"]
-        lines.append(f"描述: {session['definition'].get('description', '')}")
+        lines = [f"\n指令: {session.cmd_code}"]
+        lines.append(f"描述: {session.definition.get('description', '')}")
         lines.append("\n已輸入參數:")
         
-        for field_name, value in session["fields"].items():
+        for field_name, value in session.fields.items():
             if isinstance(value, list):
                 # 列表值只顯示前幾個和總數
                 if len(value) <= 10:
@@ -199,7 +199,7 @@ class StepProcessor:
         Returns:
             步驟配置字典
         """
-        steps = session["definition"].get("steps", [])
+        steps = session.definition.get("steps", [])
         for step_config in steps:
             if step_config.get("step") == step_num:
                 return step_config
@@ -215,4 +215,4 @@ class StepProcessor:
         Returns:
             字段字典的副本
         """
-        return session["fields"].copy()
+        return session.fields.copy()

@@ -25,6 +25,7 @@ def main():
     
     # 日誌實例
     logger = setup_logging(log_file=f"{args.m}.log", mode=args.m)    
+    
     # 網絡實例
     network=UDPTransport(
         local_ip=TCConfig(3).get_transserver_ip(),
@@ -33,8 +34,6 @@ def main():
         server_port=TCConfig(3).get_tc_port(),
         logger=logger
     )
-    
-
     
     if args.m == 'receive':
         # 接收模式（只接收數據）

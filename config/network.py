@@ -8,6 +8,9 @@ import binascii
 from typing import Protocol, Tuple, Optional
 #from abc import ABC, abstractmethod
 
+
+# 避免 mode class 碰到Transport實例
+# 放便後續新增TCPTransport
 class NetworkTransport(Protocol):
     """網絡傳輸協議接口"""
     def open(self) -> bool: ...
@@ -67,7 +70,7 @@ class UDPTransport:
             self.logger.error(f"接收數據失敗: {e}")
             return b"", None
     
-    def send_data(self, data, addr):
+    def send_data(self, data, addr: Optional[Tuple[str, int]] = None):
         """發送數據"""
         if not self.socket:
             self.logger.error("尚未開啟UDP連接")
