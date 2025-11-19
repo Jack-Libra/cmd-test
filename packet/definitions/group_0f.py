@@ -143,7 +143,6 @@ F0_GROUP_DEFINITIONS = {
                 "name": "設備編號",
                 "offset": 12,
                 "type": "uint8",
-                "optional": True,
                 "description": "設備編號"
             }
         ],

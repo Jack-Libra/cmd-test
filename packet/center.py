@@ -72,13 +72,13 @@ class PacketCenter:
         self.process(packet)
 
         # 獲取命令碼
-        command = packet.get("指令編號")
+        command = packet.cmd_code
 
         # 如果需要ACK，發送ACK
-        if not packet.get("needs_ack", False):
+        if not packet.needs_ack:
             return True
 
-        ack_frame = self.create_ack(packet["序列號"], packet["號誌控制器ID"])
+        ack_frame = self.create_ack(packet.seq, packet.tc_id)
         
         try:
             if self.network:
@@ -86,8 +86,8 @@ class PacketCenter:
                 ack_hex = binascii.hexlify(ack_frame).decode('ascii').upper()
                 log_msg = (
                     f"{'='*60}\n"
-                    f"發送ACK: Seq=0x{packet['序列號']:02X}, "
-                    f"TC_ID={packet['號誌控制器ID']:03d}, "
+                    f"發送ACK: Seq=0x{packet.seq:02X}, "
+                    f"TC_ID={packet.tc_id:03d}, "
                     f"目標={addr[0]}:{addr[1]}, "
                     f"封包={ack_hex}, "
                     f"回應封包={command}\n"

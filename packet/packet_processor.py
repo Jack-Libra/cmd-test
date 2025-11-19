@@ -10,8 +10,6 @@ from utils import format_packet_display
 class PacketProcessor:
     """封包處理器"""
     
-    # 步階信息文件路徑
-    STEP_INFO_FILE = 'logs/current_step.json'
 
     def __init__(self, packet_def, mode="receive"):
         self.logger = get_logger(f"tc.{mode}")
@@ -26,6 +24,7 @@ class PacketProcessor:
             "5FC0": self._handle_5fc0, #查詢回報
             "5FC3": self._handle_5fc3, #查詢回報
             "5FC8": self._handle_5fc8, #查詢回報
+            "5FC6": self._handle_5fc6, #查詢回報
             "0F04": self._handle_0f04,
             "0F80": self._handle_0f80,
             "0F81": self._handle_0f81,
@@ -43,7 +42,7 @@ class PacketProcessor:
             return
         
         # 獲取命令碼
-        command = packet.get("指令編號")
+        command = packet.cmd_code
 
         # 查找對應的處理方法
         if command in self.handlers:
@@ -64,8 +63,8 @@ class PacketProcessor:
 
     def _handle_5f00(self, packet):
         """處理5F00封包（控制策略自動回報）"""
-        control_strategy = packet.get("控制策略")
-        begin_end = packet.get("控制策略狀態")
+        control_strategy = packet.extra_fields.get("控制策略")
+        begin_end = packet.extra_fields.get("控制策略狀態")
         
         fields = {
             "控制策略": control_strategy,
@@ -76,100 +75,75 @@ class PacketProcessor:
 
     def _handle_5f03(self, packet):
         """處理5F03封包（時相資料庫管理）"""
-        phase_order = packet.get("時相編號")
-        sub_phase_id = packet.get("分相序號")
-        step_id = packet.get("步階序號")
-        step_sec = packet.get("步階秒數")
-        
-        # 保存當前步階信息
-        current_dict = {
-            '分相序號': sub_phase_id,
-            '步階序號': step_id,
-            '步階秒數': step_sec,
-            '時相編號': f'{phase_order:02X}'.upper()
-        }
-
-        try:
-            with open(self.STEP_INFO_FILE, 'w') as file:
-                json.dump(current_dict, file)
-        except Exception as e:
-            self.logger.error(f"保存步階信息失敗: {e}")
-        
-        signal_status_list = packet.get("燈號狀態列表")
-        
+        phase_order = packet.extra_fields.get("時相編號")
+        signal_map = packet.extra_fields.get("號誌位置圖")  # SignalMap 對象
+        signal_status_list = packet.extra_fields.get("燈號狀態列表")  # SignalStatusList 對象
+    
         fields = {
             "時相編號": f"{phase_order:02X}",
-            "號誌位置圖": packet.get("號誌位置圖"),
-            "岔路數目": packet.get("岔路數目"),
-            "分相序號": sub_phase_id,
-            "步階序號": step_id,
-            "步階秒數": f"{step_sec} 秒"
+            "號誌位置圖": str(signal_map),  # 自動格式化
+            "岔路數目": packet.extra_fields.get("岔路數目"),
+            "分相序號": packet.extra_fields.get("分相序號"),
+            "步階序號": packet.extra_fields.get("步階序號"),
+            "步階秒數": f"{packet.extra_fields.get('步階秒數')} 秒"
         }
-
+        
         log_message = format_packet_display(packet, "5F03", fields)
-    
-        # 手動添加信號狀態（因為它們已經是格式化字符串）
-        if isinstance(signal_status_list, list) and signal_status_list:
+        
+        # 添加信號狀態
+        if signal_status_list and len(signal_status_list) > 0:
             lines = log_message.split("\n")
-            # 在 "原始資料" 之前插入
             insert_pos = len(lines) - 1
-            for status_line in reversed(signal_status_list):
-                lines.insert(insert_pos, str(status_line))
+            for status_line in reversed(signal_status_list.formatted_lines):
+                lines.insert(insert_pos, status_line)
             log_message = "\n".join(lines)
         
         return log_message
 
     def _handle_5fc3(self, packet):
         """處理5FC3封包（時相排列回報）"""
-        phase_order = packet.get("時相編號")
-        signal_map = packet.get("號誌位置圖")
-        signal_count = packet.get("岔路數目")
-        sub_phase_count = packet.get("綠燈分相數目")
-        signal_status_list = packet.get("燈號狀態列表")
+        phase_order = packet.extra_fields.get("時相編號")
+        signal_map = packet.extra_fields.get("號誌位置圖")
+        signal_status_list = packet.extra_fields.get("燈號狀態列表")
         
-        # 構建字段字典
         fields = {
             "時相編號": f"{phase_order:02X}",
-            "號誌位置圖": signal_map,
-            "岔路數目": signal_count,
-            "綠燈分相數目": sub_phase_count,
+            "號誌位置圖": str(signal_map),
+            "岔路數目": packet.extra_fields.get("岔路數目"),
+            "綠燈分相數目": packet.extra_fields.get("綠燈分相數目"),
         }
         
         log_message = format_packet_display(packet, "5FC3", fields)
         
-        # 添加信號狀態列表（如果已經是格式化字符串列表）
-        if isinstance(signal_status_list, list) and signal_status_list:
+        if signal_status_list and len(signal_status_list) > 0:
             lines = log_message.split("\n")
-            # 在 "原始資料" 之前插入
             insert_pos = len(lines) - 1
-            for status_line in reversed(signal_status_list):
-                lines.insert(insert_pos, str(status_line))
+            for status_line in reversed(signal_status_list.formatted_lines):
+                lines.insert(insert_pos, status_line)
             log_message = "\n".join(lines)
         
         return log_message
 
     def _handle_5f0c(self, packet):
         """處理5F0C封包（時相步階變換控制管理）"""
-        control_strategy = packet.get("控制策略")
-        sub_phase_id = packet.get("分相序號")
-        step_id = packet.get("步階序號")
+        control_strategy = packet.extra_fields.get("控制策略")
+        sub_phase_id = packet.extra_fields.get("分相序號")
+        step_id = packet.extra_fields.get("步階序號")
         
-        # 從 current_step.json 讀取步階秒數
-        step_sec = self._load_step_sec()
+
         
         fields = {
             "控制策略": control_strategy,
             "分相序號": sub_phase_id,
-            "步階序號": step_id,
-            "步階秒數": f"{step_sec} 秒"
+            "步階序號": step_id
         }
         
         return format_packet_display(packet, "5F0C", fields)
     
     def _handle_5fc0(self, packet):
         """處理5FC0封包（控制策略回報）"""
-        control_strategy = packet.get("控制策略")
-        effect_time = packet.get("動態控制策略有效時間")
+        control_strategy = packet.extra_fields.get("控制策略")
+        effect_time = packet.extra_fields.get("動態控制策略有效時間")
         
         fields = {
             "控制策略": control_strategy,
@@ -180,7 +154,7 @@ class PacketProcessor:
 
     def _handle_5f08(self, packet):
         """處理5F08封包（號誌控制器現場操作）"""
-        operation = packet.get("現場操作碼")
+        operation = packet.extra_fields.get("現場操作碼")
         fields = {
             "現場操作碼": operation
         }
@@ -188,13 +162,13 @@ class PacketProcessor:
     
     def _handle_5fc8(self, packet):
         """處理5FC8封包（時制計畫回報）"""
-        plan_id = packet.get("時制計畫編號")
-        direct = packet.get("基準方向")
-        phase_order = packet.get("時相編號")
-        sub_phase_count = packet.get("綠燈分相數")
-        green_times = packet.get("各分相綠燈時間")
-        cycle_time = packet.get("週期秒數")
-        offset = packet.get("時差秒數")
+        plan_id = packet.extra_fields.get("時制計畫編號")
+        direct = packet.extra_fields.get("基準方向")
+        phase_order = packet.extra_fields.get("時相編號")
+        sub_phase_count = packet.extra_fields.get("綠燈分相數")
+        green_times = packet.extra_fields.get("各分相綠燈時間")
+        cycle_time = packet.extra_fields.get("週期秒數")
+        offset = packet.extra_fields.get("時差秒數")
         
         # 構建字段字典
         fields = {
@@ -214,24 +188,51 @@ class PacketProcessor:
         
         return format_packet_display(packet, "5FC8", fields)
 
-
-    def _load_step_sec(self):
-        """讀取步階秒數（共享方法）"""
-        try:
-            with open(self.STEP_INFO_FILE, 'r') as f:
-                step_data = json.load(f)
-                return step_data.get('步階秒數')
-        except Exception as e:
-            self.logger.error(f"讀取步階秒數失敗: {e}")
-            return 0
+    def _handle_5fc6(self, packet):
+        """處理5FC6封包（一般日時段型態查詢回報）"""
+        segment_type = packet.extra_fields.get("時段類型")
+        segment_count = packet.extra_fields.get("時段數量")
+        segment_list = packet.extra_fields.get("時段列表")
+        num_weekday = packet.extra_fields.get("星期數量")
+        weekday_list = packet.extra_fields.get("星期列表")
+        
+        # 格式化時段列表為字符串列表
+        formatted_segments = []
+        if isinstance(segment_list, list):
+            for i, segment in enumerate(segment_list, 1):
+                formatted_segments.append(f"時段 {i}: {segment.hour:02d}:{segment.minute:02d} (計畫ID: {segment.plan_id})")
+        
+        # 格式化星期列表為字符串列表
+        WEEKDAY_MAP = {
+            1: "星期一", 2: "星期二", 3: "星期三", 4: "星期四",
+            5: "星期五", 6: "星期六", 7: "星期日",
+            11: "隔週休星期一", 12: "隔週休星期二", 13: "隔週休星期三",
+            14: "隔週休星期四", 15: "隔週休星期五", 16: "隔週休星期六", 17: "隔週休星期日"
+        }
+        
+        formatted_weekdays = []
+        if isinstance(weekday_list, list):
+            for weekday in weekday_list:
+                weekday_name = WEEKDAY_MAP.get(weekday, f"未知({weekday})")
+                formatted_weekdays.append(weekday_name)
+        
+        fields = {
+            "時段類型": segment_type,
+            "時段數量": segment_count,
+            "時段列表": formatted_segments,  # 使用格式化後的列表
+            "星期數量": num_weekday,
+            "星期列表": formatted_weekdays,  # 使用格式化後的列表
+        }
+        
+        return format_packet_display(packet, "5FC6", fields)
 
 
 #=========0F群組封包處理=========
 
     def _handle_0f04(self, packet):
         """處理0F04封包（設備硬體狀態管理）"""
-        hardware_status = packet.get("硬體狀態碼")
-        hardware_status_list = packet.get("硬體狀態碼")  # 已經是格式化字符串列表
+        hardware_status = packet.extra_fields.get("硬體狀態碼")
+        hardware_status_list = packet.extra_fields.get("硬體狀態碼")  # 已經是格式化字符串列表
         
         # 使用 format_packet_display 格式化
         fields = {
@@ -253,7 +254,7 @@ class PacketProcessor:
 
     def _handle_0f80(self, packet):
         """處理0F80封包（設定回報-成功）"""
-        command_id = packet.get("指令ID")
+        command_id = packet.extra_fields.get("指令ID")
         
         # 解析 command_id: 高字节是设备码，低字节是指令码
         device_code = (command_id >> 8) & 0xFF
@@ -267,9 +268,9 @@ class PacketProcessor:
 
     def _handle_0f81(self, packet):
         """處理0F81封包（設定/查詢回報-失敗）"""
-        command_id = packet.get("指令ID")
-        error_code = packet.get("錯誤碼")
-        param_num = packet.get("參數編號")
+        command_id = packet.extra_fields.get("指令ID")
+        error_code = packet.extra_fields.get("錯誤碼")
+        param_num = packet.extra_fields.get("參數編號")
         
         # 解析 command_id
         device_code = (command_id >> 8) & 0xFF

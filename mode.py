@@ -77,6 +77,7 @@ class Base:
             try:
                 data, addr = self.network.receive_data()
                 if addr and data:
+                    
                     # 處理緩衝區，獲取完整幀列表
                     frames = self.network.process_buffer(data)
                     

@@ -175,13 +175,12 @@ def _u16(x: int) -> int:
         raise ValueError(f"u16 range error: {x}")
     return x
 
-def format_packet_display(packet: dict, command: str, 
-                         fields: dict) -> str:
+def format_packet_display(packet, command, fields):
     """
     統一的封包顯示格式化函數
     
     Args:
-        packet: 解析後的封包字典
+        packet: 封包對象
         command: 指令碼
         fields: 字段映射字典 {顯示名稱: 值或獲取函數}
     
@@ -192,14 +191,15 @@ def format_packet_display(packet: dict, command: str,
     
     # 標題
     lines.append("="*60)
-    raw_packet = packet.get("原始封包")
-    lines.append(f"接收 {command} 封包: {raw_packet}")
+ 
+    lines.append(f"接收 {command} 封包: {packet.raw_packet}")
     lines.append("=== 封包詳細資訊 ===")
     
     # 標準字段
-    lines.append(f"序列號 (SEQ): 0x{packet.get('序列號', 0):02X}")
-    lines.append(f"控制器編號: TC{packet.get('號誌控制器ID', 0):03d}")
+    lines.append(f"序列號 (SEQ): 0x{packet.seq:02X}")
+    lines.append(f"控制器編號: TC{packet.tc_id:03d}")
     lines.append(f"指令: {command}")
+    lines.append(f"訊息型態: {packet.reply_type}")
     
     # 自定義字段
     for label, value in fields.items():
@@ -213,10 +213,9 @@ def format_packet_display(packet: dict, command: str,
             lines.append(f"{label}: {value}")
     
     # 結尾
-    lines.append(f"原始資料: {raw_packet}")
+    lines.append(f"原始資料: {packet.raw_packet}")
     
-    receive_time = packet.get("接收時間")
-    lines.append(f"接收時間: {receive_time}")
+    lines.append(f"接收時間: {packet.receive_time}")
 
     lines.append("="*60)
     
