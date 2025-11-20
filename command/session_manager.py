@@ -8,6 +8,7 @@ import threading
 from dataclasses import dataclass, field
 from typing import Dict, Any, Optional
 
+# 語法糖
 # session[xx] 改為 session.xx
 @dataclass
 class Session:

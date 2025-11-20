@@ -39,7 +39,6 @@ F0_GROUP_DEFINITIONS = {
                 "name": "指令ID",
                 "index": 2,  # payload[2] 和 payload[3] 组成 command_id (2 bytes)
                 "type": "uint16",
-                "endian": "big",
                 "description": "指令ID (2 bytes: 設備碼 + 指令碼)"
             }
         ],
@@ -63,7 +62,6 @@ F0_GROUP_DEFINITIONS = {
                 "name": "指令ID",
                 "index": 2,  # payload[2] 和 payload[3]
                 "type": "uint16",
-                "endian": "big",
                 "description": "指令ID (2 bytes: 設備碼 + 指令碼)"
             },
             {
@@ -100,7 +98,6 @@ F0_GROUP_DEFINITIONS = {
                 "name": "硬體狀態碼",
                 "index": 2,  # PAYLOAD[2] 開始（0F 04 之後）
                 "type": "uint16",
-                "endian": "big",
                 "description": "硬體狀態碼（16 bits）",
                 "post_process": format_0f04_hardware_status
             }

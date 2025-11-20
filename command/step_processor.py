@@ -4,16 +4,10 @@
 處理多步驟指令輸入的步驟邏輯
 """
 
-from typing import Dict, Any, Optional, Protocol, Tuple
+from typing import Dict, Any, Optional, Tuple
 from utils import validate_param_range
+from packet.packet_definition import PacketDefinitionProtocol
 
-
-# ============= Protocol 接口 =============
-
-class PacketDefinitionProtocol(Protocol):
-    """封包定義協議接口"""
-    def get_field_definition(self, definition: Dict[str, Any], field_name: str) -> Optional[Dict[str, Any]]: ...
-    def parse_input(self, value_str: str, field_def: Dict[str, Any], param_name: str) -> int: ...
 
 
 # ============= 輸入驗證器 =============
@@ -87,29 +81,39 @@ class StepProcessor:
     
     def get_step_prompt(self, session) -> str:
         """獲取當前步驟的提示信息"""
-        step_config = self._get_step_config(session, session.current_step)
-        if not step_config:
-            return "錯誤: 無法獲取步驟配置"
+        steps = session.definition.get("steps", [])
         
-        prompt_template = step_config.get("prompt", "步驟 {step}/{total}: {description}\n> ")
+        # next()
+        step = next((step for step in steps if step.get("step") == session.current_step))
+        
+        prompt_template = step.get("prompt", "步驟 {step}/{total}: {description}\n> ")
         
         replacements = {
             "step": session.current_step,
             "total": session.total_steps,
-            "description": step_config.get("description", ""),
+            "description": step.get("description", ""),
             **session.fields
         }
         
-        # 檢查是否有列表字段需要計算數量
-        for field_name in step_config.get("fields", []):
+        # 檢查是否有count_from需要計算數量
+        # get_step_prompt 提示用戶需要輸入數量
+        # process_step 處理用戶輸入數量
+        for field_name in step.get("fields", []):
+            
             field_def = self.packet_def.get_field_definition(session.definition, field_name)
-            if field_def and field_def.get("type") == "list":
-                count = self._calculate_list_count(field_def, session.fields)
+            
+            if field_def and field_def.get("count_from"):
+                
+                # lambda函式=field_def["count_from"]，類型統一為int
+                # 執行lambda函式，傳入session.fields
+                count = int(field_def["count_from"](session.fields)) 
+                
                 replacements["total"] = count
-                break  # 通常一個步驟只有一個列表字段
+                
+                break  # 一個step一個count_from
         
         # 處理預覽
-        if step_config.get("preview") and step_config.get("type") == "confirmation":
+        if step.get("preview") and step.get("type") == "confirmation":
             replacements["preview"] = self._generate_preview(session)
         
         try:
@@ -124,18 +128,20 @@ class StepProcessor:
         Returns:
             (success, message, is_complete)
         """
-        step_config = self._get_step_config(session, session.current_step)
-        if not step_config:
+        steps = session.definition.get("steps", [])
+        step = next((step for step in steps if step.get("step") == session.current_step))
+
+        if not step:
             return False, "錯誤: 無法獲取步驟配置", False
         
         # 處理確認步驟
-        if step_config.get("type") == "confirmation":
+        if step.get("type") == "confirmation":
             return self._handle_confirmation(user_input)
         
         # 解析輸入
         parts = user_input.split()
         errors = []
-        fields_to_parse = step_config.get("fields", [])
+        fields_to_parse = step.get("fields", [])
         
         # 處理字段
         i = 0
@@ -151,7 +157,9 @@ class StepProcessor:
             
             # 處理列表字段
             if field_def.get("type") == "list":
-                count = self._calculate_list_count(field_def, session.fields)
+                
+                count = int(field_def["count_from"](session.fields)) # 類型統一為int
+
                 success, list_values, error = self.validator.parse_list_values(
                     parts, i, count, field_def, field_name
                 )
@@ -180,27 +188,10 @@ class StepProcessor:
         if session.current_step > session.total_steps:
             return True, "所有步驟完成，準備發送", True
         
-        next_prompt = self.get_step_prompt(session)
-        return True, next_prompt, False
+        return True, "", False
     
-    def get_session_fields(self, session) -> Dict[str, Any]:
-        """獲取會話的所有字段數據"""
-        return session.fields.copy()
     
     # ============= 私有方法 =============
-    
-    def _calculate_list_count(self, field_def: Dict[str, Any], fields: Dict[str, Any]) -> int:
-        """從字段定義計算列表項數量"""
-        count_from = field_def.get("count_from")
-        
-        if callable(count_from):
-            return int(count_from(fields)) # type: ignore
-        elif isinstance(count_from, str):
-            return fields.get(count_from, 0)
-        elif isinstance(count_from, int):
-            return count_from
-        else:
-            return 0
     
     def _handle_confirmation(self, user_input: str) -> Tuple[bool, str, bool]:
         """處理確認步驟"""
@@ -232,10 +223,3 @@ class StepProcessor:
         
         return "\n".join(lines)
     
-    def _get_step_config(self, session, step_num: int) -> Optional[Dict[str, Any]]:
-        """獲取步驟配置"""
-        steps = session.definition.get("steps", [])
-        for step_config in steps:
-            if step_config.get("step") == step_num:
-                return step_config
-        return None

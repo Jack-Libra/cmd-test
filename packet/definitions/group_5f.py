@@ -27,9 +27,12 @@ F5_GROUP_DEFINITIONS = {
             {"name": "岔路數目", "index": 4, "type": "uint8"},
             {"name": "分相序號", "index": 5, "type": "uint8"},
             {"name": "步階序號", "index": 6, "type": "uint8"},
-            {"name": "步階秒數", "index": 7, "type": "uint16", "endian": "big"},           
+            {"name": "步階秒數", "index": 7, "type": "uint16"},           
             # 專門類型解析器
-            {"name": "燈號狀態列表", "index": 8, "type": "signal_status_list", "count_from": "岔路數目","description": "燈號狀態列表"}
+            {"name": "燈號狀態列表", "index": 8, 
+            "type": "signal_status_list", 
+            "count_from":lambda fields: fields.get("岔路數目", 0),
+            "description": "燈號狀態列表"}
         ],   
         "validation": {
             "type": "min_length",
@@ -104,7 +107,7 @@ F5_GROUP_DEFINITIONS = {
                 "index": 6,
                 "type": "list",
                 "item_type": "uint8",
-                "count_from": lambda result: result.get("岔路數目", 0) * result.get("綠燈分相數目", 0),
+                "count_from": lambda fields: fields.get("岔路數目", 0) * fields.get("綠燈分相數目", 0),
                 "description": "燈號狀態列表（每個分相包含 SignalCount 個狀態，共 SubPhaseCount 個分相）"
             }
         ],
@@ -177,7 +180,7 @@ F5_GROUP_DEFINITIONS = {
             # 專門類型解析器
             {
             "name": "燈號狀態列表", "index": 6, "type": "signal_status_list",  
-            "count_from": lambda result: result.get("岔路數目", 0) * result.get("綠燈分相數目", 0),
+            "count_from": lambda fields: fields.get("岔路數目", 0) * fields.get("綠燈分相數目", 0),
             "description": "燈號狀態列表"
             }
         ],
@@ -361,7 +364,7 @@ F5_GROUP_DEFINITIONS = {
                 "index": 4,
                 "type": "list",
                 "item_type": "uint8",
-                "count_from": lambda result: result.get("綠燈分相數目", 0) * 7,  # 每个分相实际需要 7 个字节
+                "count_from":lambda fields: fields.get("綠燈分相數目", 0) * 6,  
                 "description": "分相基本參數列表（每個分相：MinGreen(1) + MaxGreen(2) + Yellow(1) + AllRed(1) + PedGreenFlash(1) + PedRed(1)）"
             }
         ],
@@ -524,11 +527,11 @@ F5_GROUP_DEFINITIONS = {
             # sub_phase_count
             {"name": "綠燈分相數", "index": 5, "type": "uint8"},
             # green_times
-            {"name": "各分相綠燈時間", "index": 6, "type": "list", "item_type": "uint16", "endian": "big", "count_from": "綠燈分相數"},
+            {"name": "各分相綠燈時間", "index": 6, "type": "list", "item_type": "uint16", "count_from": lambda fields: fields.get("綠燈分相數", 0)},
             # cycle_time
-            {"name": "週期秒數", "index": None, "type": "uint16", "endian": "big"},
+            {"name": "週期秒數", "index": None, "type": "uint16"},
             # offset
-            {"name": "時差秒數", "index": None, "type": "uint16", "endian": "big"}
+            {"name": "時差秒數", "index": None, "type": "uint16"}
         ],
         
         "validation": {
@@ -601,14 +604,14 @@ F5_GROUP_DEFINITIONS = {
             
             # time_segment_list
             # 專門類型解析器 
-            {"name": "時段列表", "index": 4, "type": "time_segment_list", "count_from": "時段數量"},
+            {"name": "時段列表", "index": 4, "type": "time_segment_list", "count_from": lambda fields: fields.get("時段數量", 0)},
             
             # num_weekday
             {"name": "星期數量", "index": None, "type": "uint8"},
             
             # weekday(num_weekday)
             # 專門類型解析器
-            {"name": "星期列表", "index": None, "type": "weekday_list", "count_from": "星期數量"},
+            {"name": "星期列表", "index": None, "type": "weekday_list", "count_from": lambda fields: fields.get("星期數量", 0)},
         ],
         
         "validation": {

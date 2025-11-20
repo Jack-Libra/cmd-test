@@ -5,7 +5,7 @@ import binascii
 import datetime
 from dataclasses import dataclass, field
 from typing import Dict, Any, Optional, List, NamedTuple, Tuple
-from utils import FrameDecoder, int_to_binary_list
+from utils import decode, int_to_binary_list
 from config.log_setup import get_logger
 
 # ============= 數據結構 =============
@@ -148,15 +148,15 @@ class PacketParser:
 
         self.logger = get_logger(f"tc.{mode}")
         self.packet_def = packet_def
-        self.frame_decoder = FrameDecoder()
         self.field_parser = FieldParser(packet_def)
     
     def parse(self, frame: bytes) -> Optional[Packet]:
         """解析封包"""
         
         try:
-            decoded_dict = self.frame_decoder.decode(frame)
-            decoded = DecodedFrame(**decoded_dict)
+            # 解碼封包(cks校驗、DLE反溢出)  
+                    
+            decoded = DecodedFrame(**decode(frame))
             
             # ACK 框處理
             if decoded.type == "ACK":
@@ -172,15 +172,14 @@ class PacketParser:
                        
             # STX 框處理
             if decoded.type == "STX":
-                if not decoded.payload or len(decoded.payload) < 2:
+
+                if decoded.payload is None:
+                    self.logger.warning(f"封包內容為空: {binascii.hexlify(frame).decode('ascii').upper()}")
                     return None
-                
+
                 # 構建指令碼
                 cmd_code = f"{decoded.payload[0]:02X}{decoded.payload[1]:02X}"
-                
-                # 查找定義
-                definition = self.packet_def.get_definition(cmd_code)
-                
+                              
                 # 創建基礎封包
                 packet = Packet(
                     seq=decoded.seq,
@@ -190,20 +189,21 @@ class PacketParser:
                     raw_packet=binascii.hexlify(frame).decode('ascii'),
                     receive_time=datetime.datetime.now().isoformat()
                 )
+
+                # 查找定義
+                definition = self.packet_def.get_definition(cmd_code)
                 
                 # 未定義的指令碼
                 if not definition:
-                    return packet
+                    #self.logger.warning(f"未定義的指令碼: {cmd_code}")
+                    #self.logger.warning(f"未定義封包內容: {binascii.hexlify(frame).decode('ascii').upper()}")
+                    return packet               
                 
-                # 設置定義相關字段
-                packet.command = definition.get("name", "")
-                packet.reply_type = definition.get("reply_type", "")
-                
-                # 解析字段
-                if "fields" in definition:
-                    packet = self.field_parser.parse_fields(
-                        decoded.payload, definition["fields"], packet
-                    )
+                # 其餘Packet 字段(command, reply_type, extra_fields)
+                # 5F40 fields = []
+                packet.command = definition.get("name")
+                packet.reply_type = definition.get("reply_type")          
+                packet = self.field_parser.parse_fields(decoded.payload, definition["fields"], packet)
                 
                 return packet
             
@@ -219,11 +219,13 @@ class FieldParser:
     """字段解析器"""
     
     def __init__(self, packet_def):
+        
         self.packet_def = packet_def
+        
         # 註冊所有解析器
         self.parsers = {
-            "uint8": self._parse_uint8,
-            "uint16": self._parse_uint16,
+            "uint8": self._parse_uint,
+            "uint16": self._parse_uint,
             "list": self._parse_list,
             # 專門類型解析器
             "time_segment_list": self._parse_time_segment_list,
@@ -232,15 +234,15 @@ class FieldParser:
             "signal_status_list": self._parse_signal_status_list,
         }  
 
-    def parse_fields(self, payload: bytes, fields: List[Dict[str, Any]], 
-                    result: Packet) -> Packet:
-        """解析字段列表"""
+    def parse_fields(self, payload: bytes, fields: List[Dict[str, Any]], packet: Packet) -> Packet:
+        """解析字段"""
         current_index = 0
         
         for field in fields:
             field_name = field["name"]
             field_type = field.get("type", "uint8")
             field_index = field.get("index")
+
             
             # 計算實際索引位置
             actual_index = field_index if field_index is not None else current_index
@@ -248,54 +250,52 @@ class FieldParser:
             # 獲取解析器
             parser = self.parsers.get(field_type)
             if not parser:
-                result.extra_fields[field_name] = None
+                packet.extra_fields[field_name] = None
                 continue
             
             # 解析字段
-            value, next_index = parser(payload, field, actual_index, result)
+            value, next_index= parser(payload, field, actual_index, packet)
             
-            # 應用映射和後處理
-            if value is not None:
-                value = self._apply_mapping(value, field)
-                result.extra_fields[field_name] = value
-            else:
-                result.extra_fields[field_name] = None
+            # 存入額外字段
+            # mapping映射邏輯交給processor處理
+            packet.extra_fields[field_name] = value
+
             
             # 更新索引（除非是動態字段）
             if field_index != "dynamic":
                 current_index = next_index
         
-        return result
+        return packet
+    
     # ============= 基礎類型解析器 =============
-    def _parse_uint8(self, payload: bytes, field: Dict[str, Any], 
-                    index: int, result: Packet) -> Tuple[Optional[int], int]: 
-        """解析 uint8"""
-        if index >= len(payload):
-            return None, index + 1
-        return payload[index], index + 1    
-    def _parse_uint16(self, payload: bytes, field: Dict[str, Any], 
-                     index: int, result: Packet) -> Tuple[Optional[int], int]:
-        """解析 uint16"""
-        if index + 1 >= len(payload):
-            return None, index + 2
-        endian = field.get("endian", "big")
-        value = int.from_bytes(payload[index:index+2], endian)
-        return value, index + 2
+    def _parse_uint(self, payload: bytes, field: Dict[str, Any], 
+                   index: int, packet: Packet) -> Tuple[Optional[int], int]:
+        """解析 uint8 或 uint16"""
+        field_type = field.get("type")
+        
+        size = 2 if field_type == "uint16" else 1
+        
+        if index + size - 1 >= len(payload):
+            return None, index + size
+        
+        if field_type == "uint16":
+            
+            value = int.from_bytes(payload[index:index+2], "big")
+            
+            return value, index + 2
+        
+        else:
+            return payload[index], index + 1
     
     def _parse_list(self, payload: bytes, field: Dict[str, Any], 
-                   index: int, result: Packet) -> Tuple[List[Any], int]:
+                   index: int, packet: Packet) -> Tuple[List[Any], int]:
         """解析列表字段"""
-        count_from = field.get("count_from", "")
         
-        # 獲取計數
-        if callable(count_from):
-            count = count_from(self._packet_to_dict(result))
-        elif isinstance(count_from, str):
-            count = result.extra_fields.get(count_from, 0)
-        elif isinstance(count_from, int):
-            count = count_from
-        else:
-            count = 0
+        # 長度依賴於已解析的字段 packet.extra_fields(動態存取)
+        count_from = field.get("count_from")
+
+        count = int(count_from(packet.extra_fields)) if count_from else 0
+
         
         item_type = field.get("item_type", "uint8")
         items = []
@@ -311,10 +311,7 @@ class FieldParser:
                 break
             
             if item_type == "uint16":
-                endian = field.get("endian", "big")
-                value = int.from_bytes(
-                    payload[current_index:current_index+2], endian
-                )
+                value = int.from_bytes(payload[current_index:current_index+2], "big")
                 current_index += 2
             else:
                 value = payload[current_index]
@@ -326,13 +323,15 @@ class FieldParser:
     
     # ============= 專門類型解析器 =============
     def _parse_time_segment_list(self, payload: bytes, field: Dict[str, Any], 
-                                index: int, result: Packet) -> Tuple[List[TimeSegment], int]:
+                                index: int, packet: Packet) -> Tuple[List[TimeSegment], int]:
         """
         解析時間片段列表 (Hour+Min+PlanID)(count)
         
         專門處理多個指令共用的時間片段結構
         """
-        count = result.extra_fields.get(field.get("count_from", ""), 0)
+        count_from = field.get("count_from")
+        count = int(count_from(packet.extra_fields)) if count_from else 0
+        
         segments = []
         current_index = index
         
@@ -350,13 +349,14 @@ class FieldParser:
         return segments, current_index
       
     def _parse_weekday_list(self, payload: bytes, field: Dict[str, Any], 
-                           index: int, result: Packet) -> Tuple[List[int], int]:
+                           index: int, packet: Packet) -> Tuple[List[int], int]:
         """
         解析星期列表 Weekday(num_weekday)
         
         專門處理星期列表，帶驗證（1-7: 週一到週日, 11-17: 隔週休）
         """
-        count = result.extra_fields.get(field.get("count_from", ""), 0)
+        count_from = field.get("count_from")
+        count = int(count_from(packet.extra_fields)) if count_from else 0
         weekdays = []
         current_index = index
         
@@ -366,9 +366,8 @@ class FieldParser:
             
             weekday = payload[current_index]
             # 驗證範圍：1-7, 11-17
-            if not (1 <= weekday <= 7 or 11 <= weekday <= 17):
-                # 可以記錄警告，但繼續解析
-                pass
+            #if not (1 <= weekday <= 7 or 11 <= weekday <= 17):
+            #    pass
             weekdays.append(weekday)
             current_index += 1
         
@@ -377,7 +376,7 @@ class FieldParser:
      # ============= 輔助方法 =============
 
     def _parse_signal_map(self, payload: bytes, field: Dict[str, Any], 
-                         index: int, result: Packet) -> Tuple[SignalMap, int]:
+                         index: int, packet: Packet) -> Tuple[SignalMap, int]:
         """解析號誌位置圖"""
         if index >= len(payload):
             return SignalMap(0), index + 1
@@ -385,19 +384,10 @@ class FieldParser:
         return SignalMap(value), index + 1
     
     def _parse_signal_status_list(self, payload: bytes, field: Dict[str, Any], 
-                                  index: int, result: Packet) -> Tuple[SignalStatusList, int]:
+                                  index: int, packet: Packet) -> Tuple[SignalStatusList, int]:
         """解析燈號狀態列表"""
-        count_from = field.get("count_from", "")
-        
-        # 獲取計數
-        if callable(count_from):
-            count = count_from(self._packet_to_dict(result))
-        elif isinstance(count_from, str):
-            count = result.extra_fields.get(count_from, 0)
-        elif isinstance(count_from, int):
-            count = count_from
-        else:
-            count = 0
+        count_from = field.get("count_from")
+        count = int(count_from(packet.extra_fields)) if count_from else 0
         
         status_bytes = []
         current_index = index
@@ -410,38 +400,8 @@ class FieldParser:
         
         return SignalStatusList(status_bytes), current_index
 
-    # ============= 輔助方法 =============
-    def _apply_mapping(self, value: Any, field: Dict[str, Any]) -> Any:
-        """應用字段映射"""
-        if "mapping" not in field:
-            return value
-        
-        mapping = field["mapping"]
-        try:
-            # 字典映射
-            return mapping.get(value, f"未知(0x{value:02X})")
-        except AttributeError:
-            # 函數映射
-            return mapping(value)
+
     
-    def _packet_to_dict(self, packet: Packet) -> Dict[str, Any]:
-        """將 Packet 轉換為字典（用於後處理函數和 count_from lambda）"""
-        result = {
-            "序列號": packet.seq,
-            "號誌控制器ID": packet.tc_id,
-            "欄位長度": packet.length,
-            "指令編號": packet.cmd_code,
-        }
-        if packet.command:
-            result["指令"] = packet.command
-        if packet.reply_type:
-            result["訊息型態"] = packet.reply_type
-        result["needs_ack"] = packet.needs_ack
-        # 添加英文別名（用於 lambda）
-        result["signal_count"] = packet.extra_fields.get("岔路數目", 0)
-        result["sub_phase_count"] = packet.extra_fields.get("綠燈分相數目", 0)
-        result.update(packet.extra_fields)
-        return result
-    
+
 
 

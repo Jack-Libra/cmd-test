@@ -6,7 +6,7 @@
 
 import logging
 from typing import Dict, Any, Optional, Protocol
-from utils import MessageFrame
+from utils import encode
 
 
 # ============= Protocol 接口 =============
@@ -91,7 +91,7 @@ class PacketBuilder:
             if payload is None:
                 return None
             
-            return MessageFrame.encode(seq, addr, payload)
+            return encode(seq, addr, payload)
             
         except Exception as e:
             self.logger.error(f"構建封包失敗: {e}", exc_info=True)

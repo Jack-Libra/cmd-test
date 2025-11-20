@@ -3,18 +3,22 @@
 """
 
 import json
+from typing import Any
 from config.log_setup import get_logger
-from config.constants import CONTROL_STRATEGY_MAP
 from utils import format_packet_display
 
 class PacketProcessor:
     """封包處理器"""
     
-
     def __init__(self, packet_def, mode="receive"):
+        
         self.logger = get_logger(f"tc.{mode}")
         self.mode = mode
+        
+        # log_modes
+        # mapping
         self.packet_def = packet_def
+        
         # 命令到處理方法的映射
         self.handlers = {
             "5F00": self._handle_5f00, #主動回報
@@ -29,12 +33,8 @@ class PacketProcessor:
             "0F80": self._handle_0f80,
             "0F81": self._handle_0f81,
         } 
+        
         self.logger.info("封包處理器初始化完成")
-    
-    def _should_log(self, command):
-        """判斷是否應該記錄日誌"""
-        definition = self.packet_def.get_definition(command)
-        return definition and self.mode in definition["log_modes"]
 
     def process(self, packet):
         """處理封包"""
@@ -65,6 +65,10 @@ class PacketProcessor:
         """處理5F00封包（控制策略自動回報）"""
         control_strategy = packet.extra_fields.get("控制策略")
         begin_end = packet.extra_fields.get("控制策略狀態")
+        
+        # 應用映射
+        control_strategy = self._apply_mapping(control_strategy, "控制策略", packet.cmd_code)
+        begin_end = self._apply_mapping(begin_end, "控制策略狀態", packet.cmd_code)      
         
         fields = {
             "控制策略": control_strategy,
@@ -130,7 +134,8 @@ class PacketProcessor:
         sub_phase_id = packet.extra_fields.get("分相序號")
         step_id = packet.extra_fields.get("步階序號")
         
-
+        # 應用映射
+        control_strategy = self._apply_mapping(control_strategy, "控制策略", packet.cmd_code)
         
         fields = {
             "控制策略": control_strategy,
@@ -145,6 +150,9 @@ class PacketProcessor:
         control_strategy = packet.extra_fields.get("控制策略")
         effect_time = packet.extra_fields.get("動態控制策略有效時間")
         
+        # 應用映射
+        control_strategy = self._apply_mapping(control_strategy, "控制策略", packet.cmd_code)
+        
         fields = {
             "控制策略": control_strategy,
             "有效時間": f"{effect_time} 分鐘"
@@ -155,6 +163,10 @@ class PacketProcessor:
     def _handle_5f08(self, packet):
         """處理5F08封包（號誌控制器現場操作）"""
         operation = packet.extra_fields.get("現場操作碼")
+        
+        # 應用映射
+        operation = self._apply_mapping(operation, "現場操作碼", packet.cmd_code)
+        
         fields = {
             "現場操作碼": operation
         }
@@ -170,6 +182,7 @@ class PacketProcessor:
         cycle_time = packet.extra_fields.get("週期秒數")
         offset = packet.extra_fields.get("時差秒數")
         
+
         # 構建字段字典
         fields = {
             "時制計畫編號": plan_id,
@@ -289,3 +302,34 @@ class PacketProcessor:
         }
         
         return format_packet_display(packet, "0F81", fields)
+
+#=============輔助方法=============
+
+    def _apply_mapping(self, value: Any, field_name: str, cmd_code: str) -> Any:
+        """在顯示時應用字段映射"""
+        if value is None:
+            return None
+        
+        # 獲取指令定義
+        definition = self.packet_def.get_definition(cmd_code)
+        if not definition:
+            return value
+        
+        field_def = self.packet_def.get_field_definition(definition, field_name)
+  
+        mapping = field_def["mapping"]
+        # 處理字典映射
+        if isinstance(mapping, dict):
+            return mapping.get(value, f"未知(0x{value:02X})")
+        
+        # 處理函數映射
+        if callable(mapping):
+            return mapping(value)
+        
+        return value
+
+    def _should_log(self, command):
+        """判斷是否應該記錄日誌"""
+        definition = self.packet_def.get_definition(command)
+        return definition and self.mode in definition["log_modes"]
+

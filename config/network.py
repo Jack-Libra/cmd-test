@@ -5,6 +5,7 @@ UDP傳輸層
 
 import socket
 import binascii
+import struct
 from typing import Protocol, Tuple, Optional
 #from abc import ABC, abstractmethod
 
@@ -38,8 +39,8 @@ class UDPTransport:
         try:
             self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             
-            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1) # 允許重複使用地址
-                     
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+        
             self.socket.bind(self.local_addr)
             self.socket.settimeout(1.0)
             self.buffer.buffer.clear()
@@ -79,6 +80,136 @@ class UDPTransport:
         try:
             self.socket.sendto(data, target_addr)
             #self.logger.info(f"發送數據到 {target_addr[0]}:{target_addr[1]}")
+            return True
+        except Exception as e:
+            self.logger.error(f"發送數據失敗: {e}")
+            return False
+    
+    def process_buffer(self, data):
+        """處理緩衝區數據，返回完整封包列表"""
+        return self.buffer.feed(data)
+
+# 待實現
+class MulticastUDPTransport:
+    """Multicast UDP傳輸層"""
+    
+    def __init__(self, local_ip, local_port, 
+                 server_ip, server_port, logger,
+                 multicast_group=None, multicast_ttl=1):
+        """
+        初始化UDP傳輸層
+        
+        Args:
+            local_ip: 本地IP地址
+            local_port: 本地端口
+            server_ip: 服務器IP地址（或multicast地址）
+            server_port: 服務器端口
+            logger: 日誌記錄器
+            multicast_group: Multicast組地址（例如 "224.1.1.1"），None表示不使用multicast
+            multicast_ttl: Multicast TTL值（默認1，僅本地網絡）
+        """
+        self.local_addr = (local_ip, local_port)
+        self.server_addr = (server_ip, server_port)
+        self.multicast_group = multicast_group
+        self.multicast_ttl = multicast_ttl
+        self.socket = None
+        self.buffer = PacketBuffer(logger)
+        self.logger = logger
+    
+    def open(self):
+        """開啟UDP連接"""
+        if self.socket:
+            self.close()
+        
+        try:
+            self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            
+            # 設置 SO_REUSEPORT（允許多個進程綁定同一端口）
+            try:
+                self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+            except (AttributeError, OSError):
+                # Windows 或舊版 Linux 不支持
+                pass
+            
+            # 如果是 multicast 接收者
+            if self.multicast_group:
+                # 設置 socket 選項
+                self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                
+                # 綁定到端口（對於multicast，可以綁定到 0.0.0.0 或特定接口）
+                self.socket.bind(('', self.local_addr[1]))
+                
+                # 加入 multicast 組
+                multicast_addr = socket.inet_aton(self.multicast_group)
+                interface = socket.inet_aton(self.local_addr[0] if self.local_addr[0] != '0.0.0.0' else '0.0.0.0')
+                membership = struct.pack('4s4s', multicast_addr, interface)
+                self.socket.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, membership)
+                
+                # 設置 multicast TTL（用於發送）
+                self.socket.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, self.multicast_ttl)
+                
+                # 設置 multicast loopback（是否接收自己發送的數據）
+                self.socket.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_LOOP, 1)
+                
+                self.logger.info(f"開啟UDP Multicast連接: 組={self.multicast_group}, 端口={self.local_addr[1]}")
+            else:
+                # 普通 UDP 綁定
+                self.socket.bind(self.local_addr)
+                self.logger.info(f"開啟UDP連接: {self.local_addr[0]}:{self.local_addr[1]}")
+        
+            self.socket.settimeout(1.0)
+            self.buffer.buffer.clear()
+            return True
+        except Exception as e:
+            self.logger.error(f"開啟UDP連接失敗: {e}")
+            return False
+    
+    def close(self):
+        """關閉UDP連接"""
+        if self.socket:
+            # 如果是 multicast，離開組
+            if self.multicast_group:
+                try:
+                    multicast_addr = socket.inet_aton(self.multicast_group)
+                    interface = socket.inet_aton(self.local_addr[0] if self.local_addr[0] != '0.0.0.0' else '0.0.0.0')
+                    membership = struct.pack('4s4s', multicast_addr, interface)
+                    self.socket.setsockopt(socket.IPPROTO_IP, socket.IP_DROP_MEMBERSHIP, membership)
+                except Exception as e:
+                    self.logger.warning(f"離開multicast組失敗: {e}")
+            
+            self.socket.close()
+            self.socket = None
+            self.logger.info("UDP連接已關閉")
+    
+    def receive_data(self):
+        """接收數據"""
+        if not self.socket:
+            return b"", None
+        
+        try:
+            data, addr = self.socket.recvfrom(4096) # 4KB
+            return data, addr
+        except socket.timeout:
+            return b"", None
+        except Exception as e:
+            self.logger.error(f"接收數據失敗: {e}")
+            return b"", None
+    
+    def send_data(self, data, addr: Optional[Tuple[str, int]] = None):
+        """發送數據"""
+        if not self.socket:
+            self.logger.error("尚未開啟UDP連接")
+            return False
+        
+        # 如果指定了地址，使用指定地址；否則使用 server_addr
+        target_addr = addr if addr is not None else self.server_addr
+        
+        # 如果是 multicast，確保使用 multicast 地址
+        if self.multicast_group and target_addr[0] != self.multicast_group:
+            target_addr = (self.multicast_group, target_addr[1])
+        
+        try:
+            self.socket.sendto(data, target_addr)
             return True
         except Exception as e:
             self.logger.error(f"發送數據失敗: {e}")
@@ -130,9 +261,7 @@ class PacketBuffer:
             
             packet = bytes(self.buffer[:total])
             packets.append(packet)
-            #packet_hex = binascii.hexlify(packet).decode('ascii').upper()
-            #self.logger.info(f"提取封包: {len(packet)} bytes (type={packet_type}), 封包內容: {packet_hex}")
-            
+           
             self.buffer = self.buffer[total:]
         
         return packets

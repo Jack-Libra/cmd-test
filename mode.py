@@ -11,13 +11,14 @@ from typing import Optional
 import binascii
 
 from config.config import TCConfig
+from config.log_setup import get_logger
 from config.network import NetworkTransport
+
 from packet.center import PacketCenter
-from packet.packet_definition import PacketDefinition
 
 from command.session_manager import SessionManager
 from command.step_processor import StepProcessor
-from config.log_setup import get_logger
+
 
 class Base:
     """基類：提供共同的初始化和接收功能"""
@@ -82,16 +83,8 @@ class Base:
                     frames = self.network.process_buffer(data)
                     
                     for frame in frames:
-                        #if frame[0] == 0xAA and frame[1] == 0xDD:
-                            #frame_hex = binascii.hexlify(frame).decode('ascii').upper()
-                            #self.logger.info(f"接收ACK封包: {frame_hex}")
-
-
                         # 解析封包
-                        packet = self.center.parse(frame)
-                        if packet:
-                            # 處理接收到的封包（子類實現）
-                            self._handle_received_packet(packet, addr)
+                        self.center.process(self.center.parse(frame), addr)
                 
                 time.sleep(0.01)
                 
@@ -102,9 +95,7 @@ class Base:
         
         self.logger.info("接收線程已停止")
     
-    def _handle_received_packet(self, packet, addr):
-        """處理接收到的封包"""
-        pass
+
 
 class Receive(Base):
     """接收模式：只接收數據，不發送命令"""
@@ -129,20 +120,13 @@ class Receive(Base):
             self.receive_thread.join()
         
         except KeyboardInterrupt:
-            self.logger.info("\n接收模式已停止")
+            self.logger.info("退出接收模式")
         
         finally:
             self.stop()
         
         return True
     
-    def _handle_received_packet(self, packet, addr):
-        """處理接收到的封包（覆寫基類方法）"""
-
-        
-        # 處理封包(並發送ACK)
-        #self.center.process(packet)
-        self.center.process_and_ack(packet, addr)
         
 class Command(Base):
     """指令下傳介面類：接收+命令雙線程，使用 seq 追蹤命令狀態"""
@@ -151,7 +135,7 @@ class Command(Base):
         
         super().__init__(device_id, mode, network, logger)
 
-        self.packet_def = PacketDefinition()
+        self.packet_def = self.center.packet_def
 
         self.session_manager = SessionManager(timeout=300)
         self.step_processor = StepProcessor(self.packet_def)
@@ -181,28 +165,22 @@ class Command(Base):
             daemon=True
         )
         self.command_thread.start()
-        try:
-            self.logger.info("命令模式已啟動")
+        try:        
             self.command_thread.join()
         except KeyboardInterrupt:
-            self.logger.info("\n命令模式已停止")
+            self.logger.info("退出命令模式")
         finally:
             self.stop()
         
         return True
-   
-    def _handle_received_packet(self, packet, addr):
-        """處理接收到的封包（覆寫基類方法）"""
-        # 统一处理所有封包，包括 0F80/0F81
-        self.center.process_and_ack(packet, addr)        
-
 
 # =============命令迴圈=============    
 
     def _command_loop(self):
         """指令輸入迴圈"""
-        
+        self.logger.info("命令模式已啟動")
         self._show_help()
+        print("輸入指令進入會話")
         
         while self.running:
             try:
@@ -217,34 +195,39 @@ class Command(Base):
                     continue
                 
                 # 處理會話命令
-                if user_input.lower() == 'cancel' and active_session:
+                if user_input.lower() == 'q' and active_session:
                     self.session_manager.remove_session(active_session.cmd_code)
-                    print("已取消當前指令輸入")
+                    print("取消當前指令輸入")
                     continue
                 
                 # 如果有活動會話，處理步驟輸入
                 if active_session:
-                    success, message, is_complete = self.step_processor.process_step(
-                        active_session, user_input
-                    )
-                    print(message)
+                    
+                    success, message, is_complete = self.step_processor.process_step(active_session, user_input)
+                    
+                    # process_step 返回
+                    if message:
+                        print(message)
                     
                     if is_complete and success:
+                        
                         # 發送指令
-                        fields = self.step_processor.get_session_fields(active_session)
+                        
                         cmd_code = active_session.cmd_code
                         
                         description = active_session.definition.get("description", active_session.cmd_code)
                         
-                        self._send_and_register_command(cmd_code, fields, description)
+                        self.center.send_command(cmd_code, active_session.fields, description)
                         
                         self.session_manager.remove_session(active_session.cmd_code)
-
+                    
+                    # 輸入失敗 重新輸入
                     continue
 
                 
                 # 處理普通命令
-                if user_input.lower() == 'quit':
+                if user_input.lower() == 'q':
+                    self.logger.info("退出命令模式")
                     break
                 elif user_input.lower() == 'help':
                     self._show_help()
@@ -254,16 +237,9 @@ class Command(Base):
                     self._execute_command(user_input)
                         
             except KeyboardInterrupt:
-                # 取消活動會話
-                active_session = self.session_manager.get_active_session()
-                
-                if active_session:  
-                    self.session_manager.remove_session(active_session.cmd_code)
-                
-                    print("\n已取消當前指令輸入")
-                
+                self.logger.info("退出命令模式")
                 break
-            
+          
             except Exception as e:
                 self.logger.info(f"指令處理錯誤: {e}")
         
@@ -272,90 +248,27 @@ class Command(Base):
     def _execute_command(self, user_input):
         """執行指令"""
         try:
-
             
             cmd = user_input.upper().split()[0]
 
             definition = self.packet_def.get_definition(cmd)
             
             if not definition:
-                print(f"不支援的指令類型: {cmd}")
+                print(f"尚未實作指令: {cmd}")
                 return
             
             if definition.get("reply_type") not in ["查詢", "設定"]:
                 print(f"{cmd} 不是可執行命令")
                 return
             
-            steps = definition.get("steps", [])
-            if not steps:
-                print(f"錯誤: {cmd} 缺少 steps 定義")
-                return
-            
-            # 判斷是單步還是多步
-            is_single_step = len(steps) == 1 and steps[0].get("type") != "confirmation"
-            has_params = len(user_input.split()) > 1
-            
-            if is_single_step:
-                # 單步指令：必須帶參數
-                if not has_params:
-                    format = definition.get("format")
-                    example = definition.get("example")
-                    print(f"{cmd} 需要參數\n格式: {format}\n範例: {example}")
-                    return
-                
-                # 創建會話，處理單步
-                session = self.session_manager.create_session(cmd, definition)
-                
-                param_str = " ".join(user_input.split()[1:]) # 字串
-                
-                success, message, is_complete = self.step_processor.process_step(session, param_str)
-                
-                if success and is_complete:
-                    fields = self.step_processor.get_session_fields(session)
-                    description = definition.get("description")
-                    
-                    self._send_and_register_command(cmd, fields, description)
-                    self.session_manager.remove_session(cmd)
-                else:
-                    print(message)
-                    self.session_manager.remove_session(cmd)
-            else:
-                # 無參數查詢指令:確認提示(step1)
-                # 多步指令：統一進入互動模式(step1)，忽略參數
-                # 創建會話並開始多步驟輸入
-                session = self.session_manager.create_session(cmd, definition)
-
-
+            # 統一處理：所有指令都創建會話，忽略參數
+            # 後續步驟由循環統一處理
+            self.session_manager.create_session(cmd, definition)
             
         except Exception as e:
             print(f"指令執行錯誤: {e}")
    
-    def _send_and_register_command(self, cmd, fields, description):
-        """發送指令封包"""
-        try:
-            seq = self.center.next_seq()
 
-            # 構建封包
-            frame = self.center.build(cmd, fields, seq=seq, addr=self.tc_id)
-            
-            # 發送封包
-            if not frame:
-                print(f"構建封包失敗: {cmd}")
-                return None
-            
-            addr = (self.config.get_tc_ip(), self.config.get_tc_port())
-            if self.network.send_data(frame, addr):
-                self.logger.info(f"發送指令: {description} (SEQ: {seq})")
-                self.logger.info(f"封包內容: {binascii.hexlify(frame).decode('ascii')}")
-                return seq
-            else:
-                print("封包發送失敗")
-                return None
-                
-        except Exception as e:
-            self.logger.error(f"發送指令封包失敗: {e}", exc_info=True)
-            print(f"發送失敗: {e}")
-            return None
 
 
 # =============顯示說明=============    
@@ -379,8 +292,7 @@ class Command(Base):
                 example = definition.get("example")
                 print(f"{desc} - {format}")
                 print(f"範例: {example}\n")
-
-        print("\n請輸入指令 (輸入 'help' 查看說明): ")
+    
         
     def _show_status(self):
         """顯示系統狀態"""     

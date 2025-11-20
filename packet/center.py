@@ -4,14 +4,17 @@
 """
 
 import threading
+import binascii
+from typing import Tuple, Optional, Set
+
 from packet.packet_parser import PacketParser
 from packet.packet_builder import PacketBuilder
 from packet.packet_processor import PacketProcessor
 from packet.packet_definition import PacketDefinition
 
-from utils import AckFrame
+from utils import encode
 from config.log_setup import get_logger
-import binascii
+
 
 
 class PacketCenter:
@@ -28,11 +31,13 @@ class PacketCenter:
         self.builder = PacketBuilder(packet_def=self.packet_def)
         self.processor = PacketProcessor(mode=mode, packet_def=self.packet_def)
         
-        # 保存 network 和 logger 用於 process_and_ack
         self.network = network
-
+        self.config = config  
+        self.tc_id = tc_id    
         
         self.seq = 0
+        self.pending_seqs: Set[int] = set()
+
         self.seq_lock = threading.Lock()
 
     def parse(self, packet):
@@ -43,61 +48,123 @@ class PacketCenter:
         """構建封包"""
         return self.builder.build(cmd_code, fields, seq, addr)
     
-    def process(self, packet):
-        """處理封包"""
-        self.processor.process(packet)
-    
-    def create_ack(self, seq, addr):
-        """創建ACK封包"""
-        return AckFrame.encode(seq, addr)
-    
     def next_seq(self):
         """獲取下一個序列號（線程安全）"""
         with self.seq_lock:
             self.seq = (self.seq + 1) & 0xFF
             return self.seq
 
-    def process_and_ack(self, packet, addr):
+    def send(self, frame: bytes, addr: Tuple[str, int], description: str = "") -> bool:
         """
-        處理封包並發送ACK
+        發送封包
         
         Args:
-            packet: 解析後的封包字典
+            frame: 封包字節數據
+            addr: 發送地址 (ip, port)
+            description: 封包描述（用於日誌）
+            
+        Returns:
+            是否發送成功
+        """
+        if not self.network:
+            self.logger.error("網路未初始化")
+            return False
+        
+        try:
+            if self.network.send_data(frame, addr):
+
+
+                frame_hex = binascii.hexlify(frame).decode('ascii').upper()
+                self.logger.info("="*60)
+                self.logger.info(f"發送地址: {addr[0]}:{addr[1]}")
+                if description:
+                    self.logger.info(f"描述: {description}")
+                self.logger.info(f"封包內容: {frame_hex}")
+                self.logger.info("="*60)
+                return True
+            else:
+                self.logger.error("封包發送失敗")
+                return False
+        except Exception as e:
+            self.logger.error(f"發送封包失敗: {e}", exc_info=True)
+            return False
+
+    def send_command(self, cmd_code: str, fields: dict, description: str = "") -> Optional[int]:
+        """
+        發送指令封包 命令線程用
+        
+        Args:
+            cmd_code: 指令碼
+            fields: 字段數據
+            description: 指令描述
+            
+        Returns:
+            序列號（成功）或 None（失敗）
+        """
+        if not self.config:
+            self.logger.error("配置未初始化")
+            return None
+
+        seq = self.next_seq()
+        
+        # 使用 build 方法構建完整封包（addr 是控制器ID，int類型）
+        frame = self.build(cmd_code, fields, seq=seq, addr=self.tc_id)
+        
+        if frame is None:
+            self.logger.error(f"構建封包失敗: {cmd_code}")
+            return None
+        
+        # 獲取發送地址（用於 send 方法）
+        addr = (self.config.get_tc_ip(), self.config.get_tc_port())
+        
+        # 發送封包
+        if self.send(frame, addr, f"{description} (SEQ: {seq})"):
+            with self.seq_lock:
+                self.pending_seqs.add(seq)
+            return seq           
+        return None
+
+    def process(self, packet, addr):
+        """
+        處理封包並發送ACK 接收線程用
+        
+        Args:
+            packet: 解析後的封包對象 Packet 類型
             addr: 發送地址 (ip, port)
         """
         if not packet:
             return False
-        
-        # 處理封包
-        self.process(packet)
 
-        # 獲取命令碼
-        command = packet.cmd_code
+        # 如果是ACK封包，檢查是否對應待確認的seq
+        if packet.reply_type == "ACK":
+            with self.seq_lock:
+                if packet.seq in self.pending_seqs:                   
 
-        # 如果需要ACK，發送ACK
-        if not packet.needs_ack:
+                    # 在終端顯示ACK信息
+                    self.logger.info(f"[ACK] 收到確認: Seq=0x{packet.seq:02X}, TC_ID={packet.tc_id:03d}")
+                    self.logger.info(f"封包內容: {packet.raw_packet}")
+                    self.logger.info("="*60)
+                    
+                    self.pending_seqs.remove(packet.seq)
             return True
 
-        ack_frame = self.create_ack(packet.seq, packet.tc_id)
+        # 處理封包
+        self.processor.process(packet)
+
+        ack_frame = encode(packet.seq, packet.tc_id, b"")
         
-        try:
-            if self.network:
-                self.network.send_data(ack_frame, addr)
-                ack_hex = binascii.hexlify(ack_frame).decode('ascii').upper()
-                log_msg = (
-                    f"{'='*60}\n"
-                    f"發送ACK: Seq=0x{packet.seq:02X}, "
-                    f"TC_ID={packet.tc_id:03d}, "
-                    f"目標={addr[0]}:{addr[1]}, "
-                    f"封包={ack_hex}, "
-                    f"回應封包={command}\n"
-                    f"{'='*60}"
-                )
-                #self.logger.info(log_msg)
-        except Exception as e:
-            self.logger.error(f"發送ACK失敗: {e}")
-        
+        # 靜默發送ACK（不顯示日誌）
+        if self.network:
+            self.network.send_data(ack_frame, addr)
+            #ack_frame_hex = binascii.hexlify(ack_frame).decode('ascii').upper()
+            #self.logger.info("="*60)
+            #self.logger.info(f"ACK封包內容: {ack_frame_hex}")
+            #self.logger.info(f"發送地址: {addr[0]}:{addr[1]}")
+            #self.logger.info(f"對應指令: {packet.cmd_code}")
+            #self.logger.info("="*60)
+
         return True
+
 
 
 
