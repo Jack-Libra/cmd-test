@@ -5,8 +5,8 @@
 """
 
 from typing import Dict, Any, Optional, Protocol
-from packet.definitions.group_5f import F5_GROUP_DEFINITIONS
-from packet.definitions.group_0f import F0_GROUP_DEFINITIONS
+from definitions.group_5f import F5_GROUP_DEFINITIONS
+from definitions.group_0f import F0_GROUP_DEFINITIONS
 from utils import binary_list_to_int
 
 

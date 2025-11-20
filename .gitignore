@@ -44,3 +44,6 @@ current_step.json
 # Python cache
 */__pycache__/
 */.pytest_cache/
+
+logs/
+*.log

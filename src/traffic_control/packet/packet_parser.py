@@ -1,5 +1,5 @@
 """
-封包解析器 - 解耦版本
+封包解析器
 """
 import binascii
 import datetime
@@ -26,7 +26,7 @@ class Packet:
     tc_id: int  # 號誌控制器ID
     length: int  # 欄位長度
     cmd_code: Optional[str] = None  # 指令編號
-    command: Optional[str] = None  # 指令
+    command: Optional[str] = None  # 指令 "name"
     reply_type: Optional[str] = None  # 訊息型態(ACK, 設定, 查詢, 設定回報, 查詢回報, 主動回報)
     needs_ack: bool = False
     raw_packet: Optional[str] = None  # 原始封包
