@@ -179,3 +179,10 @@ y
 ## 代處理
 - **5FC6**
 - **maxgreen**
+過度抽象 Over Engineering
+facade packet_center
+
+
+FP 轉 OOP
+
+endian:little 解法
