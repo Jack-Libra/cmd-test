@@ -84,7 +84,8 @@ def decode(frame: bytes) -> Dict:
             "type": "ACK",
             "seq": seq,
             "addr": addr,   
-            "len": length
+            "len": length,
+            "payload": b""
         }
     else:
         raise ValueError(f"未知封包類型: {frame[1]:02X}")

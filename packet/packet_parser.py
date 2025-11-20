@@ -273,19 +273,21 @@ class FieldParser:
         """解析 uint8 或 uint16"""
         field_type = field.get("type")
         
-        size = 2 if field_type == "uint16" else 1
+        # 從 FIELD_TYPES 獲取 size
+        type_def = self.packet_def.get_field_type(field_type)
         
-        if index + size - 1 >= len(payload):
+        size = type_def.get("size", 1)
+        
+        if index + size > len(payload):
             return None, index + size
         
-        if field_type == "uint16":
-            
+        # 統一使用 size (FIELD_TYPES)
+        if size == 2:
             value = int.from_bytes(payload[index:index+2], "big")
-            
-            return value, index + 2
-        
         else:
-            return payload[index], index + 1
+            value = payload[index]
+        
+        return value, index + size
     
     def _parse_list(self, payload: bytes, field: Dict[str, Any], 
                    index: int, packet: Packet) -> Tuple[List[Any], int]:
@@ -302,15 +304,15 @@ class FieldParser:
         current_index = index
         
         type_def = self.packet_def.get_field_type(item_type)
-        if not type_def:
-            return items, current_index
         
         item_size = type_def.get("size", 1)
+        
         for _ in range(count):
             if current_index + item_size > len(payload):
                 break
             
-            if item_type == "uint16":
+            # 統一使用 item_size (FIELD_TYPES)
+            if item_size == 2:
                 value = int.from_bytes(payload[current_index:current_index+2], "big")
                 current_index += 2
             else:

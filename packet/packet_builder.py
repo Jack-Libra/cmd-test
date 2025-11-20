@@ -26,47 +26,25 @@ class FieldBuilder:
         self.packet_def = packet_def
     
     def build_field(self, field: Dict[str, Any], value: Any) -> bytes:
-        """構建單個字段為字節"""
-        field_type = field.get("type", "uint8")
+        """構建單個字段為字節（完全使用 FIELD_TYPES）"""
+        field_type = field.get("type")
         
+        # list : item_type
+        # 其他 : field_type
+        target_type = field.get("item_type", field_type) if field_type == "list" else field_type
+        
+        # 從 FIELD_TYPES 獲取 builder
+        # 類型固定lambda函數
+        type_def = self.packet_def.get_field_type(target_type)
+
+        builder = type_def["builder"] if type_def else b""
+        
+        # list 類型：遍歷構建；單一類型：直接構建
         if field_type == "list":
-            return self._build_list(field, value)
-        elif field_type == "uint16":
-            endian = field.get("endian", "big")
-            return self._build_uint16(value, endian)
-        else:
-            return self._build_uint8(value)
-    
-    def _build_uint8(self, value: int) -> bytes:
-        """構建 uint8"""
-        type_def = self.packet_def.get_field_type("uint8")
-        if type_def:
-            return type_def["builder"](value)
-        return bytes([value & 0xFF])
-    
-    def _build_uint16(self, value: int, endian: str = "big") -> bytes:
-        """構建 uint16"""
-        type_def = self.packet_def.get_field_type("uint16")
-        if type_def:
-            return type_def["builder"](value, endian)
-        return (value & 0xFFFF).to_bytes(2, endian)
-    
-    def _build_list(self, field: Dict[str, Any], value: Any) -> bytes:
-        """構建列表"""
-        if not isinstance(value, list):
-            return b""
-        
-        result = bytearray()
-        item_type = field.get("item_type", "uint8")
-        
-        for item in value:
-            if item_type == "uint16":
-                endian = field.get("endian", "big")
-                result.extend(self._build_uint16(item, endian))
-            else:
-                result.extend(self._build_uint8(item))
-        
-        return bytes(result)
+            return b"".join(builder(item) for item in value) if isinstance(value, list) else b""
+        return builder(value)
+       
+
 
 
 # ============= 封包構建器 =============
@@ -91,6 +69,8 @@ class PacketBuilder:
             if payload is None:
                 return None
             
+            # 編碼封包
+            # DLE溢出 checksum
             return encode(seq, addr, payload)
             
         except Exception as e:
@@ -116,12 +96,12 @@ class PacketBuilder:
         payload.append(command)
         
         # 構建字段
-        if "fields" in definition:
-            for field in definition["fields"]:
-                field_name = field["name"]
-                if field_name in fields:
-                    field_bytes = self.field_builder.build_field(field, fields[field_name])
-                    payload.extend(field_bytes)
+        for field in definition["fields"]:
+            
+            field_name = field["name"]
+            if field_name in fields:
+                field_bytes = self.field_builder.build_field(field, fields[field_name])
+                payload.extend(field_bytes)
         
         return bytes(payload)
         

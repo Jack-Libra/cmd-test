@@ -211,8 +211,7 @@ class Command(Base):
                     
                     if is_complete and success:
                         
-                        # 發送指令
-                        
+                        # 發送指令                    
                         cmd_code = active_session.cmd_code
                         
                         description = active_session.definition.get("description", active_session.cmd_code)

@@ -107,7 +107,8 @@ class PacketCenter:
 
         seq = self.next_seq()
         
-        # 使用 build 方法構建完整封包（addr 是控制器ID，int類型）
+        # 使用 PacketBuilder 構建封包
+        # DLE溢出 checksum
         frame = self.build(cmd_code, fields, seq=seq, addr=self.tc_id)
         
         if frame is None:
